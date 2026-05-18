@@ -15,9 +15,9 @@ COPY ./queries.py .
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:9688/mcp')" || exit 1
+    CMD python -c "import socket; s = socket.socket(); s.settimeout(2); s.connect(('localhost', 8000)); s.close()" || exit 1
 
-EXPOSE 9688
+EXPOSE 8000
 
 # Run the server in HTTP mode
-CMD ["python", "mcpserver.py", "http"]
+CMD ["python", "mcpserver.py", "streamable-http"]

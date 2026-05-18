@@ -309,16 +309,14 @@ def get_queries(name_of_tool: str):
 
 if __name__ == "__main__":
     import sys
-    # Default to sse for remote testing if not stdio
+    # Default to stdio mode, but allow streamable-http, sse, or http to trigger network mode
     transport_arg = sys.argv[1] if len(sys.argv) > 1 else "stdio"
     
-    if transport_arg in ["http", "sse"]:
-        # We use 'sse' as the transport because it's the standard for 
-        # MCP over HTTP. 'streamable-http' is often just a wrapper for SSE.
-        print(f"Starting ProKN MCP Server on SSE (port 8000, path /mcp)")
+    if transport_arg in ["http", "sse", "streamable-http"]:
+        print(f"Starting ProKN MCP Server on Streamable HTTP (port 8000, path /mcp)")
         
         mcp.run(
-            transport="sse", 
+            transport="streamable-http", 
             host="0.0.0.0", 
             port=8000, 
             path="/mcp"
