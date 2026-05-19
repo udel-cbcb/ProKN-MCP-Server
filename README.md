@@ -47,7 +47,7 @@ For example, the path for the MCP server config for the Antigravity MCP client i
 ```
 
 ## Build Docker Image
-Before deploying the MCP Server to the ProKN Server for production use, test the docker image. The Dockerfile is at [./Dockerfile](./Dockerfile). <br>
+Before deploying the MCP Server for production use, test the docker image. The Dockerfile is at [./Dockerfile](./Dockerfile). <br>
 1. Build the Docker image using `docker build -t prokn-mcp-server -f Dockerfile .`
 2. Start the container:
 ```sh
