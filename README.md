@@ -66,7 +66,7 @@ docker run -d \
 
 ## Usage
 
-1. This source code is also deployed to the ProKN Test Landscape, i.e. https://research.bioinformatics.udel.edu/ProKNTest/mcp. A user would need to add the following config to their MCP client:
+1. This source code is also deployed to the ProKN Test website, i.e. https://research.bioinformatics.udel.edu/ProKNTest/mcp. A user would need to add the following config to their MCP client:
 ```json
 {
   "mcpServers": {
