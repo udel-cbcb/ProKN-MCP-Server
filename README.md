@@ -1,6 +1,6 @@
 #  MCP Server for ProKN
 
-This folder contains the code for an MCP server for ProKN. It is built using FastMCP with foundational tools required to enable the usecases at https://research.bioinformatics.udel.edu/ProKN/usecases.  
+This folder contains the code for an MCP server for Protein Knowledge Network (ProKN). It is built using FastMCP with foundational tools required to enable the use cases at https://research.bioinformatics.udel.edu/ProKN/usecases.  
 
 ## Index:
 - [Local Development](#local-development)
