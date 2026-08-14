@@ -1,9 +1,10 @@
 #  MCP Server for ProKN
 
-This folder contains the code for an MCP server for Protein Knowledge Network (ProKN). It is built using FastMCP with foundational tools required to enable the use cases at https://research.bioinformatics.udel.edu/ProKN/usecases.  
+This folder contains the code for an MCP server for Protein Knowledge Network (ProKN). It is built using FastMCP with foundational tools to enable the use cases at https://research.bioinformatics.udel.edu/ProKN/usecases.  
 
 ## Index:
 - [Local Development](#local-development)
+- [Testing](#testing)
 - [Build Docker Image](#build-docker-image)
 - [Usage](#usage)
 
@@ -46,6 +47,39 @@ For example, the path for the MCP server config for the Antigravity MCP client i
 }
 ```
 
+## Testing
+
+Tests use `pytest` and are split into a fast offline tier (no database) and a live tier that queries Neo4j
+
+Install the dev dependencies (adds `pytest` and `pytest-cov` on top of the runtime deps):
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Run the offline suite (no Neo4j needed — this is what CI runs on every push):
+
+```bash
+python -m pytest -m "not live" -v
+```
+
+Run the live suite against a running Neo4j (export the same env vars as Local Development, with the database reachable). Live tests auto-skip if Neo4j is unreachable:
+
+```bash
+python -m pytest -m live -v
+```
+
+Everything, with a coverage report:
+
+```bash
+python -m pytest --cov=. -v
+```
+
+Layout:
+- `tests/test_arg_normalization.py` : offline, the argument-normalization middleware
+- `tests/test_tools_offline.py` : offline, tool wrappers with the Neo4j layer mocked
+- `tests/test_tools_live.py` : live, real Neo4j (marked `live`)
+
 ## Build Docker Image
 Before deploying the MCP Server for production use, test the docker image. The Dockerfile is at [./Dockerfile](./Dockerfile). <br>
 1. Build the Docker image using `docker build -t prokn-mcp-server -f Dockerfile .`
@@ -83,4 +117,4 @@ docker run -d \
   }
 }
 ```
-2. The MCP Client usually needs to be refreshsed (Google Antigravity) or restarted (Claude Desktop) for the new MCP Server handshake to be completed and the MCP server to be recognized.
+2. The MCP Client usually needs to be refreshed (Google Antigravity) or restarted (Claude Desktop) for the new MCP Server handshake to be completed and the MCP server to be recognized.
