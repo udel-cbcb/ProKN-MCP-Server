@@ -1,2 +1,4 @@
 __pycache__/
 .vscode/settings.json
+prokn_mcp_server_docker_run.sh
+prokn_mcp_server_docker_run.log

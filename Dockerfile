@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the server code and queries
 COPY ./mcpserver.py .
 COPY ./queries.py .
+COPY ./arg_normalization.py .
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
