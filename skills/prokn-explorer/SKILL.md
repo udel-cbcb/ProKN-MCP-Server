@@ -6,7 +6,7 @@ description: >-
   /explorer?filter=... URL that renders the subnetwork - the pathways, complexes, and GO
   terms shared among the input proteins.
   Triggers: "show these genes/proteins on ProKN", "open a gene list in the ProKN explorer",
-  "visualize a protein set as a network", or "get a ProKN Explorer link for <genes>".
+  "visualize a protein set as a network", or "get a ProKN Explorer link for a gene list".
 compatibility: >-
   Targets a running ProKN web instance (default: the ProKNTest deployment). Requires network
   access and Python 3 (standard library only). This skill renders a network; 
