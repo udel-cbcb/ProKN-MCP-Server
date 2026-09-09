@@ -5,10 +5,14 @@ an Explorer link. See `SKILL.md` for what it does; `scripts/prokn_explorer.py` i
 
 ```
 prokn-explorer/
-├── SKILL.md                  # the skill definition (what an agent reads)
-├── README.md                 # this file
+├── SKILL.md                   # the skill definition (what an agent reads)
+├── README.md                  # this file
+├── prokn-explorer.skill       # prebuilt bundle, committed so people can install it directly
+├── references/                # extra detail, loaded on demand
+│   ├── id-types.md
+│   └── pitfalls.md
 └── scripts/
-    └── prokn_explorer.py      # the script the skill runs
+    └── prokn_explorer.py       # the script the skill runs
 ```
 
 ## Packaging it as a .skill bundle
@@ -19,21 +23,27 @@ subfolder). Cowork shows a "Save skill" install button when you open a `.skill` 
 
 ### Command line (recommended)
 
-From inside this `prokn-explorer/` folder:
+From inside this `prokn-explorer/` folder, just run the bundled script:
 
 ```bash
-zip -r prokn-explorer.skill SKILL.md scripts -x '*/__pycache__/*'
+./build.sh
+```
+
+It does the zip for you (and clears stale caches first). If you'd rather run it by hand, that's:
+
+```bash
+zip -r prokn-explorer.skill SKILL.md scripts references -x '*/__pycache__/*' '*/.DS_Store'
 ```
 
 ### Finder (no terminal)
 
-1. Select `SKILL.md` and the `scripts` folder together.
+1. Select `SKILL.md`, the `scripts` folder, and the `references` folder together.
 2. Right-click → Compress. macOS makes `Archive.zip`.
 3. Rename it to `prokn-explorer.skill`
 
 Note: compressing the whole `prokn-explorer` folder instead nests everything under a
 `prokn-explorer/` directory inside the zip, which puts `SKILL.md` one level too deep.
-Select the contents (SKILL.md + scripts), not the folder.
+Select the contents (SKILL.md, scripts, references), not the folder.
 
 ## Installing
 
@@ -58,5 +68,6 @@ Claude:
 
 ## Note
 
-The `.skill` bundle is a build artifact which shouldn't be committed. Rebuild it from the tracked
-source (`SKILL.md` + `scripts/`) whenever you need a fresh copy.
+A prebuilt `prokn-explorer.skill` is committed here so people can download and install it
+directly. It's generated from the source in this folder (`SKILL.md`, `scripts/`, `references/`),
+so run `./build.sh` and re-commit the new `.skill` whenever you change those.

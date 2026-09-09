@@ -29,6 +29,9 @@ import sys
 import time
 import re
 import json
+import urllib.request
+import urllib.parse
+import urllib.error
 from typing import Annotated
 from pydantic import Field
 
@@ -62,6 +65,17 @@ mcp.add_middleware(AliasNormalizationMiddleware())
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.environ.get("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "password")
+
+# URLs used only by get_explorer_network: the ProKN web app for buidling Explorer links,
+#  and PIR's UniProt ID mapping service it uses to
+# turn non-gene IDs into gene symbols.
+PROKN_WEB_BASE_URL = os.environ.get(
+    "PROKN_WEB_BASE_URL", "https://research.bioinformatics.udel.edu/ProKN/"
+)
+PROKN_IDMAPPING_URL = os.environ.get(
+    "PROKN_IDMAPPING_URL",
+    "https://idmappingtest.uniprot.org/cgi-bin/idmapping_http_client3",
+)
 
 driver = neo4j.GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 
@@ -629,6 +643,156 @@ def get_subgraph(
     msg += (f" matching {', '.join(flt)}. Remove the filter(s), raise max_hops, or "
             f"call get_graph_schema() for valid types." if flt else ".")
     return msg
+
+# ---------------------------------------------------------------------------
+# ProKN Explorer Skill functionality
+# ---------------------------------------------------------------------------
+
+_GENE_TOKEN_RE = re.compile(r"[;,\s]+")
+
+def _map_ids_via_pir(ids, from_type, timeout=60):
+    """Map IDs to gene symbols with PIR's UniProt ID mapping service 
+
+    Synchronous mode (async=NO, to=GENENAME); the response is tab-delimited
+    "sourceID<TAB>gene" lines. Returns (genes, unmapped).
+    """
+    query = urllib.parse.urlencode({
+        "from": from_type, "to": "GENENAME", "ids": ",".join(ids), "async": "NO"})
+    url = f"{PROKN_IDMAPPING_URL}?{query}"
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=timeout) as resp:
+        text = resp.read().decode("utf-8", "replace")
+    genes, matched = [], set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t") if "\t" in line else line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        src, gene = parts[0].strip(), parts[1].strip()
+        if src.lower() == "from" or gene.lower() in ("to", "genename"):
+            continue  # skip header row if applicable
+        matched.add(src.lower())
+        if gene and gene not in genes:
+            genes.append(gene)
+    unmapped = [i for i in ids if i.lower() not in matched]
+    return genes, unmapped
+
+
+def _symbol_from_search_row(row):
+    """Pull a gene symbol out of a search_entities row: a Protein keeps it in geneNames,
+    and a Gene's own name is the symbol."""
+    idmap = row.get("identifiers") or {}
+    gn = idmap.get("geneNames")
+    if gn:
+        toks = [t for t in _GENE_TOKEN_RE.split(str(gn)) if t]
+        if toks:
+            return toks[0]
+    if (row.get("node_type") or "").lower() == "gene":
+        return idmap.get("symbol") or idmap.get("label") or row.get("name")
+    return idmap.get("symbol")
+
+
+def _map_ids_via_graph(ids):
+    """Fallback used when PIR is unreachable: turn each ID into a gene symbol with the graph's
+    own search (QUERY_SEARCH_ENTITIES). Returns (genes, unmapped)."""
+    genes, unmapped = [], []
+    for raw in ids:
+        term = str(raw).strip().lower()
+        rows = _run(QUERY_SEARCH_ENTITIES, params={
+            "t": term, "entity_types": ["protein", "gene"], "limit": 5}) if term else []
+        sym = None
+        for r in (rows or []):
+            sym = _symbol_from_search_row(r)
+            if sym:
+                break
+        if sym:
+            if sym not in genes:
+                genes.append(sym)
+        else:
+            unmapped.append(raw)
+    return genes, unmapped
+
+
+@mcp.tool()
+def get_explorer_network(
+    gene_names: Annotated[list[str], Field(description="Two or more gene symbols, e.g. ['PLK3','HIPK3','CDK1'], OR IDs of the type named by from_type; those get mapped to symbols first.")],
+    from_type: Annotated[str, Field(description="UniProt ID-type code of the inputs, e.g. 'ACC', 'P_REFSEQ_AC', 'ENSEMBL_ID'. Default 'GENENAME' means the inputs are already gene symbols and no mapping happens.")] = "GENENAME",
+) -> dict | str:
+    """Build a ProKN network from gene symbols (or other IDs) and return a shareable Explorer link.
+
+    Pass gene symbols directly, or IDs of another type with from_type; the server maps those to
+    gene symbols with PIR's UniProt ID mapping, and falls back to the graph's own search
+    (search_entities) if PIR is unreachable. Needs two or more symbols after mapping. Returns
+    {network_id, explorer_url, gene_names} (plus mapping/unmapped when from_type is used), or a
+    guidance message on failure. Read-only; calls the ProKN web app (see PROKN_WEB_BASE_URL).
+    """
+    inputs = []
+    for g in (gene_names or []):
+        g = str(g).strip()
+        if g and g not in inputs:
+            inputs.append(g)
+    if not inputs:
+        return "Error: provide at least two entities to visualize the network."
+
+    from_type = (from_type or "GENENAME").strip().upper()
+    mapping = None
+    unmapped = []
+    if from_type == "GENENAME":
+        genes = inputs
+    else:
+        try:
+            genes, unmapped = _map_ids_via_pir(inputs, from_type)
+            mapping = f"{len(inputs)} {from_type} id(s) mapped to gene symbols via PIR ID mapping"
+        except Exception:
+            genes, unmapped = _map_ids_via_graph(inputs)
+            mapping = f"PIR ID mapping unavailable; {from_type} id(s) resolved to gene symbols via graph search"
+        deduped = []
+        for g in genes:
+            if g not in deduped:
+                deduped.append(g)
+        genes = deduped
+
+    if len(genes) < 2:
+        msg = "Error: provide at least two entities to visualize the network."
+        if from_type != "GENENAME":
+            msg += f" (got {genes or 'none'} after mapping; unmapped {unmapped or 'none'})"
+        return msg + "."
+
+    base = PROKN_WEB_BASE_URL.rstrip("/")
+    api_url = f"{base}/api/knowledge_graph"
+    body = json.dumps({"gene_names": genes}).encode("utf-8")
+    req = urllib.request.Request(
+        api_url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return f"Error: the ProKN web API returned HTTP {e.code} at {api_url}."
+    except TimeoutError:
+        return (f"Error: the ProKN web API at {api_url} did not respond in time. "
+                f"Building the network can be slow for large or hub gene sets; try fewer genes, "
+                f"or confirm the endpoint is up and PROKN_WEB_BASE_URL points at the right instance.")
+    except OSError as e:
+        # URLError and other socket errors (connection refused, DNS, TLS) land here
+        reason = getattr(e, "reason", e)
+        return (f"Error: could not reach the ProKN web API at {api_url} ({reason}). "
+                f"Set PROKN_WEB_BASE_URL if the web app is hosted elsewhere.")
+
+    network_id = payload.get("network_id") if isinstance(payload, dict) else None
+    if not network_id:
+        return f"Error: the ProKN web API did not return a network_id (got: {str(payload)[:200]})."
+
+    filt = urllib.parse.quote(json.dumps({"network_id": network_id}))
+    result = {
+        "network_id": network_id,
+        "explorer_url": f"{base}/explorer?filter={filt}",
+        "gene_names": genes,
+    }
+    if from_type != "GENENAME":
+        result["mapping"] = mapping
+        result["unmapped"] = unmapped
+    return result
 
 if __name__ == "__main__":
     import sys
