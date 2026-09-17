@@ -7,6 +7,7 @@ venv/
 .venv/
 .env
 
-# build artifacts: ignore stray .skill files but keep the committed distributable
+# build artifacts: ignore stray .skill files but keep the committed distributables
 *.skill
-!skills/prokn-explorer/prokn-explorer.skill
+!skills/prokn-explorer.skill
+!skills/prokn-analysis.skill

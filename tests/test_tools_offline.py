@@ -218,3 +218,89 @@ def test_get_protein_interactions_passthrough(mock_run):
     rows = [{"interaction_path": [{"name": "P00533", "type": "Protein"}], "path_length": 1}]
     mock_run.return_value = rows
     assert mcpserver.get_protein_interactions("EGFR", "GRB2") == rows
+
+
+# ---------------------------------------------------------------------------
+# get_explorer_network, ID mapping, and the query log
+# ---------------------------------------------------------------------------
+
+class _FakeResp:
+    """Minimal stand-in for a urlopen() response used as a context manager."""
+    def __init__(self, data: bytes):
+        self._data = data
+    def read(self):
+        return self._data
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+def test_get_explorer_network_requires_two():
+    msg = mcpserver.get_explorer_network(["EGFR"])
+    assert isinstance(msg, str) and "at least two" in msg
+
+
+def test_get_explorer_network_requires_input():
+    msg = mcpserver.get_explorer_network([])
+    assert isinstance(msg, str) and msg.startswith("Error")
+
+
+@patch("mcpserver.urllib.request.urlopen")
+def test_get_explorer_network_symbols(mock_open):
+    mock_open.return_value = _FakeResp(json.dumps({"network_id": "abc123"}).encode())
+    res = mcpserver.get_explorer_network(["EGFR", "TP53"])
+    assert isinstance(res, dict)
+    assert res["network_id"] == "abc123"
+    assert "explorer?filter=" in res["explorer_url"]
+    assert res["gene_names"] == ["EGFR", "TP53"]
+    assert "mapping" not in res  # GENENAME path adds no mapping block
+
+
+@patch("mcpserver.urllib.request.urlopen")
+def test_get_explorer_network_from_acc(mock_open):
+    # first urlopen = PIR mapping, second = ProKN POST
+    mock_open.side_effect = [
+        _FakeResp(b"P00533\tEGFR\nP04637\tTP53\n"),
+        _FakeResp(json.dumps({"network_id": "n1"}).encode()),
+    ]
+    res = mcpserver.get_explorer_network(["P00533", "P04637"], from_type="ACC")
+    assert res["gene_names"] == ["EGFR", "TP53"]
+    assert res["network_id"] == "n1"
+    assert res["mapping"] and "PIR" in res["mapping"]
+    assert res["unmapped"] == []
+
+
+@patch("mcpserver.urllib.request.urlopen")
+def test_map_ids_via_pir(mock_open):
+    mock_open.return_value = _FakeResp(b"P00533\tEGFR\nP04637\tTP53\nQ0\t\n")
+    genes, unmapped = mcpserver._map_ids_via_pir(["P00533", "P04637", "Q0"], "ACC")
+    assert genes == ["EGFR", "TP53"]
+    assert unmapped == ["Q0"]
+
+
+@patch("mcpserver._run")
+def test_map_ids_via_graph_hit(mock_run):
+    mock_run.return_value = [
+        {"node_type": "Protein", "name": "EGFR", "identifiers": {"geneNames": "EGFR"}},
+    ]
+    genes, unmapped = mcpserver._map_ids_via_graph(["P00533"])
+    assert genes == ["EGFR"] and unmapped == []
+
+
+@patch("mcpserver._run")
+def test_map_ids_via_graph_unmapped(mock_run):
+    mock_run.return_value = []
+    genes, unmapped = mcpserver._map_ids_via_graph(["ZZZ"])
+    assert genes == [] and unmapped == ["ZZZ"]
+
+
+def test_query_log_reset_and_get():
+    mcpserver.reset_query_log()
+    assert isinstance(mcpserver.get_query_log(), str)  # empty -> guidance message
+    mcpserver._session_log().append(
+        {"step": 1, "tool": "search_entities", "arguments": {}, "time": "t"})
+    log = mcpserver.get_query_log()
+    assert isinstance(log, list) and log[0]["tool"] == "search_entities"
+    mcpserver.reset_query_log()
+    assert isinstance(mcpserver.get_query_log(), str)

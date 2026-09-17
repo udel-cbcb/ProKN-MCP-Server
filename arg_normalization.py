@@ -123,7 +123,16 @@ TOOL_ARG_SPECS: dict[str, dict] = {
         "aliases": {"tool": "name_of_tool", "tool_name": "name_of_tool",
                     "name": "name_of_tool"},
     },
-    
+    "get_explorer_network": {
+        "valid": ["gene_names", "from_type"],
+        "primary": "gene_names", "lists": ["gene_names"],
+        "aliases": {"genes": "gene_names", "ids": "gene_names", "gene_list": "gene_names",
+                    "gene_symbols": "gene_names", "symbols": "gene_names",
+                    "proteins": "gene_names", "protein_list": "gene_names",
+                    "from": "from_type", "id_type": "from_type", "source": "from_type",
+                    "source_type": "from_type"},
+    },
+
 }
 
 # Any key the model has used (or might plausibly use) to pass proteins to the

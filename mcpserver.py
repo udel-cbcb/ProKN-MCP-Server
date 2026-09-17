@@ -62,6 +62,61 @@ mcp = FastMCP(
 
 mcp.add_middleware(AliasNormalizationMiddleware())
 
+# Query log for reproducibility records.
+# QueryLogMiddleware appends every tool call to a per-session log, so a reproducibility record
+# is built from what actually ran, not the model's memory. Each client session gets its own log
+# (keyed by session id) so concurrent clients don't mix. In-memory: it clears on restart.
+_QUERY_LOGS: dict[str, list] = {}
+_LOG_SKIP = {"reset_query_log", "get_query_log"}
+
+try:
+    from fastmcp.server.dependencies import get_context as _get_context
+except Exception:
+    _get_context = None
+
+
+def _session_key(ctx=None):
+    """Session id so each client's query log stays separate.
+
+    Falls back to 'default' for stdio, or whenever no session is available (for
+    example in offline tests).
+    """
+    try:
+        c = ctx if ctx is not None else (_get_context() if _get_context else None)
+        if c is not None:
+            return c.session_id
+    except Exception:
+        pass
+    return "default"
+
+
+def _session_log(ctx=None):
+    return _QUERY_LOGS.setdefault(_session_key(ctx), [])
+
+
+try:
+    from fastmcp.server.middleware import Middleware as _Middleware
+
+    class QueryLogMiddleware(_Middleware):
+        """Record each tool call (name + arguments) in the caller's session log."""
+
+        async def on_call_tool(self, context, call_next):
+            msg = getattr(context, "message", None)
+            name = getattr(msg, "name", None)
+            if name and name not in _LOG_SKIP:
+                log = _session_log(getattr(context, "fastmcp_context", None))
+                log.append({
+                    "step": len(log) + 1,
+                    "tool": name,
+                    "arguments": getattr(msg, "arguments", {}),
+                    "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+            return await call_next(context)
+
+    mcp.add_middleware(QueryLogMiddleware())
+except Exception:
+    pass
+
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.environ.get("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "password")
@@ -190,6 +245,31 @@ def search_entities(
     else:
         hint += " Try a shorter or alternative term (e.g. a gene symbol or accession)."
     return hint
+
+
+@mcp.tool()
+def reset_query_log() -> str:
+    """Clear this session's tool-call log.
+
+    USE THIS TOOL at the START of an analysis so the reproducibility record only covers
+    the calls for that analysis.
+    """
+    _session_log().clear()
+    return "Query log cleared."
+
+
+@mcp.tool()
+def get_query_log() -> list[dict] | str:
+    """Return this session's tool calls since the last reset, in order.
+
+    USE THIS TOOL at the END of an analysis to build the reproducibility record from what
+    actually ran. Each row is {step, tool, arguments, time}.
+    """
+    log = _session_log()
+    if not log:
+        return ("Query log is empty. Call reset_query_log at the start of an analysis; "
+                "the tools you use after that are recorded here.")
+    return list(log)
 
 # ---------------------------------------------------------------------------
 # GRANULAR TOOLS (Individual Queries)
@@ -485,7 +565,9 @@ def get_queries(
     Returns the query string, or a message listing available tools.
     """
     
-    # dict: tool_name -> query_template
+    # dict: tool_name -> query_template.
+    # Cypher-backed tools only. Register any NEW Cypher tool here too, or get_queries won't
+    # know about it (tools that don't run Cypher, like get_explorer_network, don't belong here).
     tool_queries = {
         "search_entities": QUERY_SEARCH_ENTITIES,
         "get_phosphosites_regulated_by_perturbagen": QUERY_PHOSPHOSITES_REGULATED_BY_PERTURBAGEN_TEMPLATE,
@@ -590,7 +672,7 @@ def get_subgraph(
         max_hops: Traversal depth, integer 1-4 (default 1).
         max_nodes: Max neighbors returned, 1-200 (default 50), nearest first.
         node_type_filter: Optional list of neighbor labels to keep
-                          (e.g. ["Protein", "Gene"]). Case-insensitive. Filters the
+                          (e.g. ["Protein", "Gene"]). Case-sensitive. Filters the
                           END node only, not intermediates. Empty = all.
         relationship_type_filter: Optional list of relationship types to traverse
                           (e.g. ["CATALYZES", "INTERACTS_WITH"]). Case-insensitive.
@@ -721,11 +803,14 @@ def get_explorer_network(
 ) -> dict | str:
     """Build a ProKN network from gene symbols (or other IDs) and return a shareable Explorer link.
 
+    USE THIS TOOL when someone wants to SEE a set of proteins as a network on the ProKN Explorer,
+    not read data about them (for that, use the query tools).
+
     Pass gene symbols directly, or IDs of another type with from_type; the server maps those to
     gene symbols with PIR's UniProt ID mapping, and falls back to the graph's own search
     (search_entities) if PIR is unreachable. Needs two or more symbols after mapping. Returns
-    {network_id, explorer_url, gene_names} (plus mapping/unmapped when from_type is used), or a
-    guidance message on failure. Read-only; calls the ProKN web app (see PROKN_WEB_BASE_URL).
+    {network_id, explorer_url, gene_names, note} (plus mapping/unmapped when from_type is used), or
+    a guidance message on failure. Read-only; calls the ProKN web app (see PROKN_WEB_BASE_URL).
     """
     inputs = []
     for g in (gene_names or []):
@@ -788,6 +873,10 @@ def get_explorer_network(
         "network_id": network_id,
         "explorer_url": f"{base}/explorer?filter={filt}",
         "gene_names": genes,
+        # The POST returns a network_id even when the proteins share nothing, so the tool
+        # can't tell here whether the network is empty. Tell the user to check the view.
+        "note": ("Open the link to view the network. If the Explorer shows 'No results', these "
+                 "proteins share no pathway, complex, or GO term in ProKN."),
     }
     if from_type != "GENENAME":
         result["mapping"] = mapping
