@@ -14,3 +14,7 @@ venv/
 
 # generated benchmark output
 benchmarks/results.md
+
+# docker run helper output
+prokn_mcp_server_docker_run.sh
+prokn_mcp_server_docker_run.log
