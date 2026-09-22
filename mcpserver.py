@@ -67,7 +67,7 @@ mcp.add_middleware(AliasNormalizationMiddleware())
 # is built from what actually ran, not the model's memory. Each client session gets its own log
 # (keyed by session id) so concurrent clients don't mix. In-memory: it clears on restart.
 _QUERY_LOGS: dict[str, list] = {}
-_LOG_SKIP = {"reset_query_log", "get_query_log"}
+_LOG_SKIP = {"reset_query_log", "get_query_log", "create_reproducibility_record"}
 
 try:
     from fastmcp.server.dependencies import get_context as _get_context
@@ -270,6 +270,82 @@ def get_query_log() -> list[dict] | str:
         return ("Query log is empty. Call reset_query_log at the start of an analysis; "
                 "the tools you use after that are recorded here.")
     return list(log)
+
+
+# Latest reproducibility record per session, served as the record://session/latest resource
+# so a client can save it to a .md file instead of it being pasted into the chat.
+_RECORDS: dict[str, str] = {}
+
+
+def _build_record(session_key, question, findings, skipped, skills):
+    """Format a markdown reproducibility record from the session's query log + the given fields."""
+    log = _QUERY_LOGS.get(session_key, [])
+    lines = ["# ProKN reproducibility record", ""]
+    if question:
+        lines.append(f"**Question:** {question}")
+    lines.append(f"**Instance / date:** {PROKN_WEB_BASE_URL} / {time.strftime('%Y-%m-%d')}")
+    if skills:
+        lines.append(f"**Skills:** {skills}")
+    lines += ["", "## Tool calls"]
+    if log:
+        for r in log:
+            lines.append(f"{r['step']}. `{r['tool']}({json.dumps(r.get('arguments', {}))})`")
+    else:
+        lines.append("(query log empty; call reset_query_log at the start of an analysis)")
+    if findings:
+        lines += ["", "## Findings", findings]
+    if skipped:
+        lines += ["", "## Skipped", skipped]
+    return "\n".join(lines) + "\n"
+
+
+@mcp.tool()
+def create_reproducibility_record(
+    question: Annotated[str, Field(description="The question this analysis answered.")] = "",
+    findings: Annotated[str, Field(description="The findings, with evidence (markdown allowed).")] = "",
+    skipped: Annotated[str, Field(description="Branches you skipped and why, one per line.")] = "",
+    skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-analysis v0.3.0, prokn-explorer v0.2.0'.")] = "",
+) -> str:
+    """Build the reproducibility record from this session's query log and write it to a .md file.
+
+    USE THIS TOOL at the END of an analysis. It assembles the tool calls that actually ran (from
+    the query log) plus the fields you pass, and writes a markdown file to disk (also served as the
+    resource record://session/latest). Returns a short confirmation with the file path. Don't paste
+    the whole record into the chat; give the user the path plus a quick one- or two-line summary
+    (how many tool calls, which sources).
+
+    The file goes to PROKN_RECORD_DIR if set, otherwise a `prokn_records/` folder in the server's
+    working directory; on a remote/hosted server it lands on the server, not your machine.
+    """
+    key = _session_key()
+    md = _build_record(key, question, findings, skipped, skills)
+    _RECORDS[key] = md
+    n = len(_QUERY_LOGS.get(key, []))
+
+    record_dir = os.environ.get("PROKN_RECORD_DIR") or os.path.join(os.getcwd(), "prokn_records")
+    try:
+        os.makedirs(record_dir, exist_ok=True)
+        fname = time.strftime("prokn-record-%Y%m%d-%H%M%S.md")
+        path = os.path.join(os.path.abspath(record_dir), fname)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(md)
+        return (f"Saved the reproducibility record ({n} tool call(s)) to {path} (also served as "
+                f"record://session/latest). Give the user this path plus a quick reproducibility "
+                f"summary; don't paste the full record.")
+    except OSError as e:
+        # couldn't write a file (e.g. read-only filesystem); hand back the markdown to save
+        return (f"Could not write a record file ({e}); it is served as record://session/latest. "
+                f"Markdown follows so it isn't lost:\n\n{md}")
+
+
+@mcp.resource("record://session/latest", mime_type="text/markdown")
+def reproducibility_record_resource() -> str:
+    """The latest reproducibility record for this session, as markdown to save to a file."""
+    md = _RECORDS.get(_session_key())
+    if md:
+        return md
+    return ("# ProKN reproducibility record\n\nNo record yet. Run an analysis and call "
+            "create_reproducibility_record to build one.\n")
 
 # ---------------------------------------------------------------------------
 # GRANULAR TOOLS (Individual Queries)

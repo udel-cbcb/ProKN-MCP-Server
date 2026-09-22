@@ -40,7 +40,8 @@ the flow.
   `get_explorer_network`, not a data pull. Conversely, don't answer a facts question with just a
   link.
 
-- **Forgetting the log.** Call `reset_query_log` at the start and `get_query_log` at the end so the
-  reproducibility record comes from what actually ran. Building the record from memory drops or
-  reorders steps. The log is per session and clears on server restart, so it isn't shared across
-  separate runs.
+- **Forgetting the record.** Call `reset_query_log` at the start and `create_reproducibility_record`
+  at the end. The record is built from the log (what actually ran), not from memory, and it writes a
+  `.md` file (returning its path) instead of cluttering the chat. Give the user the path plus a
+  quick reproducibility summary; don't paste the whole record. The log is per session and clears on
+  server restart.

@@ -309,3 +309,21 @@ def test_query_log_reset_and_get():
     assert isinstance(log, list) and log[0]["tool"] == "search_entities"
     mcpserver.reset_query_log()
     assert isinstance(mcpserver.get_query_log(), str)
+
+
+def test_create_reproducibility_record_writes_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("PROKN_RECORD_DIR", str(tmp_path))
+    mcpserver.reset_query_log()
+    mcpserver._session_log().append(
+        {"step": 1, "tool": "get_drugs_mechanisms", "arguments": {"drug_identifiers": ["lapatinib"]}, "time": "t"})
+    conf = mcpserver.create_reproducibility_record(question="what does lapatinib inhibit?",
+                                                   findings="EGFR, ERBB2",
+                                                   skills="prokn-analysis v0.3.0")
+    assert isinstance(conf, str) and "Saved the reproducibility record" in conf
+    files = list(tmp_path.glob("prokn-record-*.md"))
+    assert files, "no record file written"
+    text = files[0].read_text()
+    assert "get_drugs_mechanisms" in text        # tool call pulled from the log
+    assert "## Findings" in text
+    # the resource serves the same saved record
+    assert mcpserver.reproducibility_record_resource() == text

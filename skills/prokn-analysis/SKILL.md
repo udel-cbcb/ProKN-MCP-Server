@@ -16,7 +16,7 @@ compatibility: >-
   skill for the optional visualization step.
 metadata:
   author: University of Delaware, Center for Bioinformatics and Computational Biology
-  version: "0.2.0"
+  version: "0.3.0"
   repository: https://research.bioinformatics.udel.edu/ProKN/
   companion_skill: ../prokn-explorer/SKILL.md
 ---
@@ -46,11 +46,14 @@ reproducibility record.
   only when no task tool fits; it's a last resort, not a shortcut.
 - **Cite the evidence.** Every reported connection carries edge provenance. List PMIDs if present,
   otherwise name the source database. If an edge has none, say so (see section 6).
-- **Log the run, and always print the record.** Call `reset_query_log` at the START, and the run is
-  NOT complete until you have called `get_query_log` and printed the reproducibility record
-  (section 5). Build the record from the log, not from memory. Narrating tool names in prose (for
-  example "querying drug mechanisms...") does NOT count as the record. This holds even when the run
-  ends in a visualization: the record still lists every call, including `get_explorer_network`.
+- **Log the run, and always save the record.** Call `reset_query_log` at the START, and the run is
+  NOT complete until you have called `create_reproducibility_record` at the END (section 5). It
+  builds the record from the query log and writes it to a `.md` file (also served at
+  `record://session/latest`). Do NOT paste the full record into the chat; give the user the file
+  path plus a quick reproducibility summary (a line or two: how many tool calls and which sources).
+  Narrating tool names in prose does NOT count as saving the record. This
+  holds even when the run ends in a visualization: the record still lists every call, including
+  `get_explorer_network`.
 - **Declare what you skipped.** If you didn't check a branch (drugs, pathways, a source, a
   literature step), say so with a one-line reason. A silent omission reads as "covered everything."
 - **Be honest about gaps.** If a connection isn't in the graph, report that. Don't fill gaps from
@@ -70,7 +73,7 @@ Point at the server's own tools; don't re-document them here. Grouped by concern
 - Neighborhood / paths / pathways: `get_relationship_given_entity`, `get_subgraph`,
   `get_pathways_between_protein_sets`
 - Schema / introspection: `get_graph_schema`, `get_node_properties`, `get_relationship_properties`
-- Reproducibility: `reset_query_log`, `get_query_log`
+- Reproducibility: `reset_query_log`, `get_query_log`, `create_reproducibility_record`
 - Escape hatch: `execute_read_only_cypher`
 - Visualize (hand-off): `get_explorer_network` (see section 9)
 
@@ -88,48 +91,30 @@ A map of which tool answers which question, plus the common chains, is in `refer
 5. **Cite.** Report each finding with its `evidence` attached (section 6).
 6. **Visualize (optional).** If the result is a gene/protein set worth seeing as a network, hand it
    to `prokn-explorer` / `get_explorer_network`.
-7. **Report and record.** Summarize the biology, then call `get_query_log` and write the
-   reproducibility record (section 5).
+7. **Report and record.** Summarize the biology, then call `create_reproducibility_record` to save
+   the record (section 5). End with the saved file path and a quick reproducibility summary, not the
+   full record.
 
 ## 5. Reproducibility record (required)
 
-Every run ends with this record. It is not optional and it is not a prose summary: call
-`get_query_log` and print the record built from it. If you did not call `reset_query_log` at the
-start and `get_query_log` at the end, you have not finished. Include:
+Every run ends with a saved record, not a prose summary in the chat. At the end, call
+`create_reproducibility_record`, passing:
 
-- The question.
-- Resolved entities: each input and the node it matched.
-- The tool calls in order, with arguments, from `get_query_log`.
-- Findings, each with its evidence (PMIDs or source database; see section 6).
-- The ProKN instance and the date of the run (and a data version if the server reports one).
-- Skills used: `prokn-analysis v0.2.0` (add `prokn-explorer vX` if you visualized).
-- Anything skipped, with a one-line reason.
+- `question`: the question.
+- `findings`: the findings, each with its evidence (see section 6). Markdown is fine.
+- `skipped`: any branch you skipped, one per line with a one-line reason.
+- `skills`: the skills used, e.g. `prokn-analysis v0.3.0, prokn-explorer v0.2.0`.
 
-Template:
+The tool fills in the tool calls that actually ran (from the query log) and the instance/date, then
+writes a `.md` file to disk (also served at `record://session/latest`) and returns its path. Do not
+paste the whole record into the reply: give the user the file path and a quick reproducibility
+summary — a line or two naming how many tool calls ran and which sources the evidence came from. The
+file goes to `PROKN_RECORD_DIR` if set, otherwise a `prokn_records/` folder in the server's working
+directory; on a remote server that path is on the server, not your machine.
 
-```
-## Reproducibility record
-Question: <the question>
-Instance / date: <base URL> / <YYYY-MM-DD>
-Skills: prokn-analysis v0.2.0[, prokn-explorer vX]
-
-Resolved entities:
-- <input> -> <matched node> (<type>)
-
-Tool calls (from get_query_log):
-1. <tool>(<args>)
-2. ...
-
-Findings:
-- <finding> (<source>; PMID: <...> | measurement: <...> | no provenance)
-
-Skipped:
-- <branch> - <one-line reason>
-```
-
-The log is per session, so your calls stay separate from other clients, and it clears when the
-server restarts. If you forgot to reset at the start, `get_query_log` still holds every call since
-the last reset, so report from there and note that the log may include earlier steps.
+Still call `reset_query_log` at the START, or the record will include earlier calls. The log is per
+session and clears when the server restarts. `get_query_log` is there if you want to inspect the raw
+calls.
 
 ## 6. Evidence and provenance
 
@@ -162,8 +147,9 @@ Short, named tool chains for common questions. Full steps in `references/analysi
    LINCS P100 sites it lowers.
 4. `get_proteins_catalyzing_sites(phosphosites=[...])` for the kinases, keeping the `evidence`.
 5. Resolve the kinases to gene symbols and call `get_explorer_network` for the link.
-6. `get_query_log()` and write the reproducibility record (section 5), noting any sites with no
-   known kinase.
+6. `create_reproducibility_record(question=..., findings=..., skills="prokn-analysis v0.3.0, prokn-explorer v0.2.0")`
+   to save the record; end with the saved file path and a quick reproducibility summary, noting any
+   sites with no known kinase.
 
 ## 9. Visualizing the result
 
@@ -185,5 +171,5 @@ Depth lives in `references/` so this file stays short. Open the one you need:
 
 The full list is in `references/pitfalls.md`. The ones you'll hit most: skipping `search_entities`
 and guessing a name, reaching for raw Cypher when a task tool already fits, dropping the `evidence`
-when you report a connection, and forgetting to `reset_query_log` at the start or to write the
-record at the end.
+when you report a connection, and forgetting to `reset_query_log` at the start or to call
+`create_reproducibility_record` at the end.
