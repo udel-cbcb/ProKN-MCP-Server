@@ -29,6 +29,9 @@ import sys
 import time
 import re
 import json
+import urllib.request
+import urllib.parse
+import urllib.error
 from typing import Annotated
 from pydantic import Field
 
@@ -59,9 +62,75 @@ mcp = FastMCP(
 
 mcp.add_middleware(AliasNormalizationMiddleware())
 
+# Query log for reproducibility records.
+# QueryLogMiddleware appends every tool call to a per-session log, so a reproducibility record
+# is built from what actually ran, not the model's memory. Each client session gets its own log
+# (keyed by session id) so concurrent clients don't mix. In-memory: it clears on restart.
+_QUERY_LOGS: dict[str, list] = {}
+_LOG_SKIP = {"reset_query_log", "get_query_log", "create_reproducibility_record"}
+
+try:
+    from fastmcp.server.dependencies import get_context as _get_context
+except Exception:
+    _get_context = None
+
+
+def _session_key(ctx=None):
+    """Session id so each client's query log stays separate.
+
+    Falls back to 'default' for stdio, or whenever no session is available (for
+    example in offline tests).
+    """
+    try:
+        c = ctx if ctx is not None else (_get_context() if _get_context else None)
+        if c is not None:
+            return c.session_id
+    except Exception:
+        pass
+    return "default"
+
+
+def _session_log(ctx=None):
+    return _QUERY_LOGS.setdefault(_session_key(ctx), [])
+
+
+try:
+    from fastmcp.server.middleware import Middleware as _Middleware
+
+    class QueryLogMiddleware(_Middleware):
+        """Record each tool call (name + arguments) in the caller's session log."""
+
+        async def on_call_tool(self, context, call_next):
+            msg = getattr(context, "message", None)
+            name = getattr(msg, "name", None)
+            if name and name not in _LOG_SKIP:
+                log = _session_log(getattr(context, "fastmcp_context", None))
+                log.append({
+                    "step": len(log) + 1,
+                    "tool": name,
+                    "arguments": getattr(msg, "arguments", {}),
+                    "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                })
+            return await call_next(context)
+
+    mcp.add_middleware(QueryLogMiddleware())
+except Exception:
+    pass
+
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USERNAME = os.environ.get("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "password")
+
+# URLs used only by get_explorer_network: the ProKN web app for buidling Explorer links,
+#  and PIR's UniProt ID mapping service it uses to
+# turn non-gene IDs into gene symbols.
+PROKN_WEB_BASE_URL = os.environ.get(
+    "PROKN_WEB_BASE_URL", "https://research.bioinformatics.udel.edu/ProKN/"
+)
+PROKN_IDMAPPING_URL = os.environ.get(
+    "PROKN_IDMAPPING_URL",
+    "https://idmappingtest.uniprot.org/cgi-bin/idmapping_http_client3",
+)
 
 driver = neo4j.GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 
@@ -176,6 +245,107 @@ def search_entities(
     else:
         hint += " Try a shorter or alternative term (e.g. a gene symbol or accession)."
     return hint
+
+
+@mcp.tool()
+def reset_query_log() -> str:
+    """Clear this session's tool-call log.
+
+    USE THIS TOOL at the START of an analysis so the reproducibility record only covers
+    the calls for that analysis.
+    """
+    _session_log().clear()
+    return "Query log cleared."
+
+
+@mcp.tool()
+def get_query_log() -> list[dict] | str:
+    """Return this session's tool calls since the last reset, in order.
+
+    USE THIS TOOL at the END of an analysis to build the reproducibility record from what
+    actually ran. Each row is {step, tool, arguments, time}.
+    """
+    log = _session_log()
+    if not log:
+        return ("Query log is empty. Call reset_query_log at the start of an analysis; "
+                "the tools you use after that are recorded here.")
+    return list(log)
+
+
+# Latest reproducibility record per session, served as the record://session/latest resource
+# so a client can save it to a .md file instead of it being pasted into the chat.
+_RECORDS: dict[str, str] = {}
+
+
+def _build_record(session_key, question, findings, skipped, skills):
+    """Format a markdown reproducibility record from the session's query log + the given fields."""
+    log = _QUERY_LOGS.get(session_key, [])
+    lines = ["# ProKN reproducibility record", ""]
+    if question:
+        lines.append(f"**Question:** {question}")
+    lines.append(f"**Instance / date:** {PROKN_WEB_BASE_URL} / {time.strftime('%Y-%m-%d')}")
+    if skills:
+        lines.append(f"**Skills:** {skills}")
+    lines += ["", "## Tool calls"]
+    if log:
+        for r in log:
+            lines.append(f"{r['step']}. `{r['tool']}({json.dumps(r.get('arguments', {}))})`")
+    else:
+        lines.append("(query log empty; call reset_query_log at the start of an analysis)")
+    if findings:
+        lines += ["", "## Findings", findings]
+    if skipped:
+        lines += ["", "## Skipped", skipped]
+    return "\n".join(lines) + "\n"
+
+
+@mcp.tool()
+def create_reproducibility_record(
+    question: Annotated[str, Field(description="The question this analysis answered.")] = "",
+    findings: Annotated[str, Field(description="The findings, with evidence (markdown allowed).")] = "",
+    skipped: Annotated[str, Field(description="Branches you skipped and why, one per line.")] = "",
+    skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-analysis v0.3.0, prokn-explorer v0.2.0'.")] = "",
+) -> str:
+    """Build the reproducibility record from this session's query log and write it to a .md file.
+
+    USE THIS TOOL at the END of an analysis. It assembles the tool calls that actually ran (from
+    the query log) plus the fields you pass, and writes a markdown file to disk (also served as the
+    resource record://session/latest). Returns a short confirmation with the file path. Don't paste
+    the whole record into the chat; give the user the path plus a quick one- or two-line summary
+    (how many tool calls, which sources).
+
+    The file goes to PROKN_RECORD_DIR if set, otherwise a `prokn_records/` folder in the server's
+    working directory; on a remote/hosted server it lands on the server, not your machine.
+    """
+    key = _session_key()
+    md = _build_record(key, question, findings, skipped, skills)
+    _RECORDS[key] = md
+    n = len(_QUERY_LOGS.get(key, []))
+
+    record_dir = os.environ.get("PROKN_RECORD_DIR") or os.path.join(os.getcwd(), "prokn_records")
+    try:
+        os.makedirs(record_dir, exist_ok=True)
+        fname = time.strftime("prokn-record-%Y%m%d-%H%M%S.md")
+        path = os.path.join(os.path.abspath(record_dir), fname)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(md)
+        return (f"Saved the reproducibility record ({n} tool call(s)) to {path} (also served as "
+                f"record://session/latest). Give the user this path plus a quick reproducibility "
+                f"summary; don't paste the full record.")
+    except OSError as e:
+        # couldn't write a file (e.g. read-only filesystem); hand back the markdown to save
+        return (f"Could not write a record file ({e}); it is served as record://session/latest. "
+                f"Markdown follows so it isn't lost:\n\n{md}")
+
+
+@mcp.resource("record://session/latest", mime_type="text/markdown")
+def reproducibility_record_resource() -> str:
+    """The latest reproducibility record for this session, as markdown to save to a file."""
+    md = _RECORDS.get(_session_key())
+    if md:
+        return md
+    return ("# ProKN reproducibility record\n\nNo record yet. Run an analysis and call "
+            "create_reproducibility_record to build one.\n")
 
 # ---------------------------------------------------------------------------
 # GRANULAR TOOLS (Individual Queries)
@@ -471,7 +641,9 @@ def get_queries(
     Returns the query string, or a message listing available tools.
     """
     
-    # dict: tool_name -> query_template
+    # dict: tool_name -> query_template.
+    # Cypher-backed tools only. Register any NEW Cypher tool here too, or get_queries won't
+    # know about it (tools that don't run Cypher, like get_explorer_network, don't belong here).
     tool_queries = {
         "search_entities": QUERY_SEARCH_ENTITIES,
         "get_phosphosites_regulated_by_perturbagen": QUERY_PHOSPHOSITES_REGULATED_BY_PERTURBAGEN_TEMPLATE,
@@ -576,7 +748,7 @@ def get_subgraph(
         max_hops: Traversal depth, integer 1-4 (default 1).
         max_nodes: Max neighbors returned, 1-200 (default 50), nearest first.
         node_type_filter: Optional list of neighbor labels to keep
-                          (e.g. ["Protein", "Gene"]). Case-insensitive. Filters the
+                          (e.g. ["Protein", "Gene"]). Case-sensitive. Filters the
                           END node only, not intermediates. Empty = all.
         relationship_type_filter: Optional list of relationship types to traverse
                           (e.g. ["CATALYZES", "INTERACTS_WITH"]). Case-insensitive.
@@ -629,6 +801,141 @@ def get_subgraph(
     msg += (f" matching {', '.join(flt)}. Remove the filter(s), raise max_hops, or "
             f"call get_graph_schema() for valid types." if flt else ".")
     return msg
+
+# ---------------------------------------------------------------------------
+# ProKN Explorer Skill functionality
+# ---------------------------------------------------------------------------
+
+_GENE_TOKEN_RE = re.compile(r"[;,\s]+")
+
+def _map_ids_via_pir(ids, from_type, timeout=60):
+    """Map IDs to gene symbols with PIR's UniProt ID mapping service 
+
+    Synchronous mode (async=NO, to=GENENAME); the response is tab-delimited
+    "sourceID<TAB>gene" lines. Returns (genes, unmapped).
+    """
+    query = urllib.parse.urlencode({
+        "from": from_type, "to": "GENENAME", "ids": ",".join(ids), "async": "NO"})
+    url = f"{PROKN_IDMAPPING_URL}?{query}"
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=timeout) as resp:
+        text = resp.read().decode("utf-8", "replace")
+    genes, matched = [], set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("\t") if "\t" in line else line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        src, gene = parts[0].strip(), parts[1].strip()
+        if src.lower() == "from" or gene.lower() in ("to", "genename"):
+            continue  # skip header row if applicable
+        matched.add(src.lower())
+        if gene and gene not in genes:
+            genes.append(gene)
+    unmapped = [i for i in ids if i.lower() not in matched]
+    return genes, unmapped
+
+
+def _symbol_from_search_row(row):
+    """Pull a gene symbol out of a search_entities row: a Protein keeps it in geneNames,
+    and a Gene's own name is the symbol."""
+    idmap = row.get("identifiers") or {}
+    gn = idmap.get("geneNames")
+    if gn:
+        toks = [t for t in _GENE_TOKEN_RE.split(str(gn)) if t]
+        if toks:
+            return toks[0]
+    if (row.get("node_type") or "").lower() == "gene":
+        return idmap.get("symbol") or idmap.get("label") or row.get("name")
+    return idmap.get("symbol")
+
+
+def _map_ids_via_graph(ids):
+    """Fallback used when PIR is unreachable: turn each ID into a gene symbol with the graph's
+    own search (QUERY_SEARCH_ENTITIES). Returns (genes, unmapped)."""
+    genes, unmapped = [], []
+    for raw in ids:
+        term = str(raw).strip().lower()
+        rows = _run(QUERY_SEARCH_ENTITIES, params={
+            "t": term, "entity_types": ["protein", "gene"], "limit": 5}) if term else []
+        sym = None
+        for r in (rows or []):
+            sym = _symbol_from_search_row(r)
+            if sym:
+                break
+        if sym:
+            if sym not in genes:
+                genes.append(sym)
+        else:
+            unmapped.append(raw)
+    return genes, unmapped
+
+
+@mcp.tool()
+def get_explorer_network(
+    gene_names: Annotated[list[str], Field(description="Two or more gene symbols, e.g. ['PLK3','HIPK3','CDK1'], OR IDs of the type named by from_type; those get mapped to symbols first.")],
+    from_type: Annotated[str, Field(description="UniProt ID-type code of the inputs, e.g. 'ACC', 'P_REFSEQ_AC', 'ENSEMBL_ID'. Default 'GENENAME' means the inputs are already gene symbols and no mapping happens.")] = "GENENAME",
+) -> dict | str:
+    """Build a ProKN network from gene symbols (or other IDs) and return a shareable Explorer link.
+
+    USE THIS TOOL when someone wants to SEE a set of proteins as a network on the ProKN Explorer,
+    not read data about them (for that, use the query tools).
+
+    Pass gene symbols directly, or IDs of another type with from_type; the server maps those to
+    gene symbols with PIR's UniProt ID mapping, and falls back to the graph's own search
+    (search_entities) if PIR is unreachable. Needs two or more symbols after mapping. Returns
+    {explorer_url, gene_names, note} (plus mapping/unmapped when from_type is used), or a guidance
+    message on failure. The link is self-contained (gene set in the URL; the Explorer builds the
+    network on page load), so it works on any instance. See PROKN_WEB_BASE_URL for the target.
+    """
+    inputs = []
+    for g in (gene_names or []):
+        g = str(g).strip()
+        if g and g not in inputs:
+            inputs.append(g)
+    if not inputs:
+        return "Error: provide at least two entities to visualize the network."
+
+    from_type = (from_type or "GENENAME").strip().upper()
+    mapping = None
+    unmapped = []
+    if from_type == "GENENAME":
+        genes = inputs
+    else:
+        try:
+            genes, unmapped = _map_ids_via_pir(inputs, from_type)
+            mapping = f"{len(inputs)} {from_type} id(s) mapped to gene symbols via PIR ID mapping"
+        except Exception:
+            genes, unmapped = _map_ids_via_graph(inputs)
+            mapping = f"PIR ID mapping unavailable; {from_type} id(s) resolved to gene symbols via graph search"
+        deduped = []
+        for g in genes:
+            if g not in deduped:
+                deduped.append(g)
+        genes = deduped
+
+    if len(genes) < 2:
+        msg = "Error: provide at least two entities to visualize the network."
+        if from_type != "GENENAME":
+            msg += f" (got {genes or 'none'} after mapping; unmapped {unmapped or 'none'})"
+        return msg + "."
+
+    base = PROKN_WEB_BASE_URL.rstrip("/")
+    # Self-contained link: the gene set travels in the URL and the Explorer computes the network
+    # on page load
+    filt = urllib.parse.quote(json.dumps({"gene_names": genes}))
+    result = {
+        "explorer_url": f"{base}/explorer?filter={filt}",
+        "gene_names": genes,
+        # The Explorer builds the network from these genes
+        "note": ("Open the link to view the network. If the Explorer shows 'No results', these "
+                 "proteins share no pathway, complex, or GO term in ProKN."),
+    }
+    if from_type != "GENENAME":
+        result["mapping"] = mapping
+        result["unmapped"] = unmapped
+    return result
 
 if __name__ == "__main__":
     import sys

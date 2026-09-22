@@ -1,4 +1,20 @@
 __pycache__/
 .vscode/settings.json
+.DS_Store
+
+# python envs / secrets
+venv/
+.venv/
+.env
+
+# build artifacts: ignore stray .skill files but keep the committed distributables
+*.skill
+!skills/prokn-explorer.skill
+!skills/prokn-analysis.skill
+
+# generated benchmark output
+benchmarks/results.md
+
+# docker run helper output
 prokn_mcp_server_docker_run.sh
 prokn_mcp_server_docker_run.log

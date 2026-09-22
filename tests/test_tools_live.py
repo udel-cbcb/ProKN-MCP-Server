@@ -225,3 +225,19 @@ class TestUseCaseE2E:
         assert isinstance(targets, list) and targets, f"{drug}: step 1 returned no targets"
         assert neighbors is not None, "step 2 did not run (no usable target label)"
         assert isinstance(neighbors, (list, str)), "step 2 (target neighbors) did not return"
+
+
+# ---------------------------------------------------------------------------
+# ID mapping graph fallback (used by get_explorer_network when PIR is down)
+# ---------------------------------------------------------------------------
+
+def test_map_ids_via_graph_resolves_accession():
+    """A UniProt accession should resolve to its gene symbol via search_entities."""
+    genes, unmapped = mcpserver._map_ids_via_graph(["P00533"])  # EGFR
+    assert "EGFR" in genes, f"expected EGFR from P00533, got {genes} (unmapped {unmapped})"
+
+
+def test_map_ids_via_graph_reports_unmapped():
+    """An ID that resolves to nothing is reported as unmapped, not dropped."""
+    genes, unmapped = mcpserver._map_ids_via_graph(["NOTAREALID_ZZZ"])
+    assert unmapped == ["NOTAREALID_ZZZ"]
