@@ -809,8 +809,9 @@ def get_explorer_network(
     Pass gene symbols directly, or IDs of another type with from_type; the server maps those to
     gene symbols with PIR's UniProt ID mapping, and falls back to the graph's own search
     (search_entities) if PIR is unreachable. Needs two or more symbols after mapping. Returns
-    {network_id, explorer_url, gene_names, note} (plus mapping/unmapped when from_type is used), or
-    a guidance message on failure. Read-only; calls the ProKN web app (see PROKN_WEB_BASE_URL).
+    {explorer_url, gene_names, note} (plus mapping/unmapped when from_type is used), or a guidance
+    message on failure. The link is self-contained (gene set in the URL; the Explorer builds the
+    network on page load), so it works on any instance. See PROKN_WEB_BASE_URL for the target.
     """
     inputs = []
     for g in (gene_names or []):
@@ -845,36 +846,13 @@ def get_explorer_network(
         return msg + "."
 
     base = PROKN_WEB_BASE_URL.rstrip("/")
-    api_url = f"{base}/api/knowledge_graph"
-    body = json.dumps({"gene_names": genes}).encode("utf-8")
-    req = urllib.request.Request(
-        api_url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        return f"Error: the ProKN web API returned HTTP {e.code} at {api_url}."
-    except TimeoutError:
-        return (f"Error: the ProKN web API at {api_url} did not respond in time. "
-                f"Building the network can be slow for large or hub gene sets; try fewer genes, "
-                f"or confirm the endpoint is up and PROKN_WEB_BASE_URL points at the right instance.")
-    except OSError as e:
-        # URLError and other socket errors (connection refused, DNS, TLS) land here
-        reason = getattr(e, "reason", e)
-        return (f"Error: could not reach the ProKN web API at {api_url} ({reason}). "
-                f"Set PROKN_WEB_BASE_URL if the web app is hosted elsewhere.")
-
-    network_id = payload.get("network_id") if isinstance(payload, dict) else None
-    if not network_id:
-        return f"Error: the ProKN web API did not return a network_id (got: {str(payload)[:200]})."
-
-    filt = urllib.parse.quote(json.dumps({"network_id": network_id}))
+    # Self-contained link: the gene set travels in the URL and the Explorer computes the network
+    # on page load
+    filt = urllib.parse.quote(json.dumps({"gene_names": genes}))
     result = {
-        "network_id": network_id,
         "explorer_url": f"{base}/explorer?filter={filt}",
         "gene_names": genes,
-        # The POST returns a network_id even when the proteins share nothing, so the tool
-        # can't tell here whether the network is empty. Tell the user to check the view.
+        # The Explorer builds the network from these genes
         "note": ("Open the link to view the network. If the Explorer shows 'No results', these "
                  "proteins share no pathway, complex, or GO term in ProKN."),
     }

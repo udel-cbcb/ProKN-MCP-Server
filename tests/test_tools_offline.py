@@ -7,6 +7,7 @@ the get_subgraph JSON shape (mirroring how mcp-proto-okn mocks SPARQLWrapper)
 Run:  python -m pytest tests/test_tools_offline.py -v
 """
 import json
+import urllib.parse
 from unittest.mock import patch
 import mcpserver
 
@@ -246,27 +247,31 @@ def test_get_explorer_network_requires_input():
     assert isinstance(msg, str) and msg.startswith("Error")
 
 
-@patch("mcpserver.urllib.request.urlopen")
-def test_get_explorer_network_symbols(mock_open):
-    mock_open.return_value = _FakeResp(json.dumps({"network_id": "abc123"}).encode())
+def _filter_from_url(url):
+    """Pull the decoded JSON filter out of an explorer_url built by the tool."""
+    q = urllib.parse.urlparse(url).query
+    return json.loads(urllib.parse.parse_qs(q)["filter"][0])
+
+
+def test_get_explorer_network_symbols():
+    # No network call for the GENENAME path: the link is self-contained.
     res = mcpserver.get_explorer_network(["EGFR", "TP53"])
     assert isinstance(res, dict)
-    assert res["network_id"] == "abc123"
+    assert "network_id" not in res
     assert "explorer?filter=" in res["explorer_url"]
     assert res["gene_names"] == ["EGFR", "TP53"]
+    assert _filter_from_url(res["explorer_url"]) == {"gene_names": ["EGFR", "TP53"]}
     assert "mapping" not in res  # GENENAME path adds no mapping block
 
 
 @patch("mcpserver.urllib.request.urlopen")
 def test_get_explorer_network_from_acc(mock_open):
-    # first urlopen = PIR mapping, second = ProKN POST
-    mock_open.side_effect = [
-        _FakeResp(b"P00533\tEGFR\nP04637\tTP53\n"),
-        _FakeResp(json.dumps({"network_id": "n1"}).encode()),
-    ]
+    # only network call is the PIR mapping; the link itself is self-contained (no POST)
+    mock_open.return_value = _FakeResp(b"P00533\tEGFR\nP04637\tTP53\n")
     res = mcpserver.get_explorer_network(["P00533", "P04637"], from_type="ACC")
     assert res["gene_names"] == ["EGFR", "TP53"]
-    assert res["network_id"] == "n1"
+    assert "network_id" not in res
+    assert _filter_from_url(res["explorer_url"]) == {"gene_names": ["EGFR", "TP53"]}
     assert res["mapping"] and "PIR" in res["mapping"]
     assert res["unmapped"] == []
 

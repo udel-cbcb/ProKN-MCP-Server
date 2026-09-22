@@ -2,9 +2,9 @@
 name: prokn-explorer
 description: >-
   Turn a list of gene symbols (or other protein IDs) into a ProKN network and a shareable
-  Explorer link. POSTs the genes to the ProKN knowledge_graph API, receives a cached
-  network_id, and builds the URL that renders the subnetwork. Non-gene IDs (UniProt
-  accessions, RefSeq, ...) are mapped to gene symbols first.
+  Explorer link. Builds a self-contained URL that carries the gene set (filter with
+  gene_names); the Explorer computes the subnetwork on page load, so the link works on any
+  instance. Non-gene IDs (UniProt accessions, RefSeq, ...) are mapped to gene symbols first.
   Triggers: "show / display / view these genes or proteins in ProKN", "visualize a 
   gene or protein set as a network or graph", "network view of these genes", 
   "make a network / subnetwork from this list", "map or show the relationships between
@@ -18,7 +18,7 @@ compatibility: >-
   to query ProKN data itself, use the ProKN MCP server tools.
 metadata:
   author: University of Delaware, Center for Bioinformatics and Computational Biology
-  version: "0.2.0"
+  version: "0.3.0"
   repository: https://research.bioinformatics.udel.edu/ProKN/
   base_url: https://research.bioinformatics.udel.edu/ProKN/
   api_endpoint: /api/knowledge_graph
@@ -67,14 +67,18 @@ after all the work is done:
 
 ## 3. How it works
 
-Two steps against a running ProKN instance:
+The link is self-contained: the gene set travels in the URL and the Explorer builds the network on
+page load.
 
-1. **POST** the gene symbols to `POST {base_url}/api/knowledge_graph` with body
-   `{"gene_names": ["PLK3", "HIPK3", ...]}`. ProKN drops duplicates, builds a subnetwork of the
-   pathways, complexes, GO terms, and other entities the input proteins share, caches it, and returns
-   `{"network_id": "..."}`.
-2. **Build the Explorer link:** URL-encode `{"network_id": "..."}` as the `filter` query parameter,
-   giving `{base_url}/explorer?filter=...`. Opening it loads the cached network.
+1. **Build the filter:** URL-encode `{"gene_names": ["PLK3", "HIPK3", ...]}` as the `filter` query
+   parameter, giving `{base_url}/explorer?filter=...`.
+2. **Open it:** the Explorer sends the genes to `{base_url}/api/knowledge_graph`, which drops
+   duplicates and builds a subnetwork of the pathways, complexes, GO terms, and other entities the
+   input proteins share, then renders it.
+
+This replaces the older two-step POST/`network_id` flow, whose id lived in one server process's
+in-memory cache and broke when the page-load read hit a different worker or after a restart. A
+`gene_names` link needs no shared cache, so it works on any instance.
 
 The subnetwork is what the input entities have in common, so when you hand over the link, say what
 it shows (the pathways, complexes, and other nodes connecting the proteins) instead of just pasting
@@ -90,7 +94,7 @@ When the ProKN MCP server is connected, call the tool with the gene symbols:
 get_explorer_network(gene_names=["PLK3", "HIPK3", "MAPK11", "CDK1", "CDK2"])
 ```
 
-It returns `{network_id, explorer_url, gene_names}`. Give the `explorer_url` back to the user.
+It returns `{explorer_url, gene_names}`. Give the `explorer_url` back to the user.
 
 If the inputs aren't gene symbols, pass the ID type with `from_type` and the tool maps them for
 you before building the network:
@@ -150,7 +154,7 @@ Input: `PLK3, HIPK3, MAPK11, CDK1, CDK2`
 
 ```bash
 $ python scripts/prokn_explorer.py PLK3 HIPK3 MAPK11 CDK1 CDK2
-https://research.bioinformatics.udel.edu/ProKN/explorer?filter=%7B%22network_id%22%3A%22...%22%7D
+https://research.bioinformatics.udel.edu/ProKN/explorer?filter=%7B%22gene_names%22%3A%20%5B%22PLK3%22%2C%20...%5D%7D
 ```
 
 Give that URL back to the user to view the network.
@@ -162,13 +166,13 @@ Make each result easy to reproduce. Don't just paste a bare URL. Report:
 - **The exact gene symbols sent to ProKN**, after de-duplication and (if used) mapping. This is the
   real input, and it can differ from what the user typed.
 - **Any inputs that didn't map**, when `--from` was used, so the coverage is clear.
-- **The skill and version** that produced it (`prokn-explorer v0.2.0`, from this file's
+- **The skill and version** that produced it (`prokn-explorer v0.3.0`, from this file's
   `metadata.version`) and **which path you used**: the `get_explorer_network` MCP tool or the
   fallback script. When IDs were mapped, note how (PIR or the graph-search fallback). The tool
   returns this in its `mapping` field.
 
-Say plainly if the network came back empty (a valid `network_id` with "No results") instead of
-implying the link is broken.
+Say plainly if the network came back empty (the Explorer shows "No results") instead of implying the
+link is broken.
 
 ## 8. References (read on demand)
 

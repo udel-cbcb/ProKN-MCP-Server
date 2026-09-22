@@ -3,14 +3,15 @@
 Skim this before reporting a result. Each item is the flip side of an input rule or a step in the
 main workflow.
 
-- **Cached links expire.** The `network_id` lives in ProKN's in-memory cache. If the Explorer says
-  "Your session on ProKN expired", the entry is gone (it expired, the server restarted, or it's a
-  different instance). Run the POST again for a fresh id and link. Don't treat an expired link as a
-  data problem.
+- **Links are self-contained now.** The link carries the gene set in the URL
+  (`filter={"gene_names":[...]}`) and the Explorer builds the network on page load, so there's no
+  `network_id` cache to expire and no "Your session on ProKN expired" (that was the old flow, which
+  broke across server workers/restarts). If a link doesn't render, check the genes and the host, not
+  a cache.
 
 - **Empty networks are valid, not broken.** If the input proteins share no pathway, complex, or GO
-  term, the POST still returns a valid `network_id`, but the Explorer shows "No results". Say so
-  plainly instead of implying the link is broken or the proteins don't exist.
+  term, the Explorer shows "No results". Say so plainly instead of implying the link is broken or
+  the proteins don't exist.
 
 - **Gene symbols only.** ProKN matches the protein `geneNames` property. Accessions, RefSeq,
   Ensembl, PubChem CIDs, and protein names won't match directly, so map them with `--from` first

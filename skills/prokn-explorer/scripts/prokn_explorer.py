@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Send a list of gene symbols to ProKN and print an Explorer link for the network.
+"""Print a self-contained ProKN Explorer link for a set of gene symbols.
 
-ProKN's /api/knowledge_graph endpoint takes the genes, builds a subnetwork of the
-pathways/complexes/GO terms they share, caches it, and gives back a network_id.
-Putting that id in the Explorer URL shows the network.
+The link carries the gene set in the URL (filter={"gene_names":[...]}). The Explorer
+builds the subnetwork of the pathways/complexes/GO terms they share on page load, so
+the link works on any instance without relying on a server-side network_id cache.
 
 ProKN only matches on gene symbols, so if you have other IDs (UniProt accessions,
 RefSeq, etc.) pass --from with the ID type and the script maps them to gene symbols
@@ -104,24 +104,10 @@ def map_ids_to_genes(ids, from_type, timeout=60):
     return genes, unmapped
 
 
-def build_network(gene_symbols, base_url, timeout=60):
-    api_url = base_url.rstrip("/") + "/api/knowledge_graph"
-    body = json.dumps({"gene_names": gene_symbols}).encode("utf-8")
-    req = urllib.request.Request(
-        api_url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    payload = json.loads(read_url(req, api_url, timeout).decode("utf-8"))
-    network_id = payload.get("network_id")
-    if not network_id:
-        raise RuntimeError(f"No network_id came back from ProKN (received: {str(payload)[:200]})")
-    return network_id
-
-
-def explorer_url(network_id, base_url):
-    filter_param = urllib.parse.quote(json.dumps({"network_id": network_id}))
+def explorer_url(gene_symbols, base_url):
+    # Self-contained link: the gene set travels in the URL and the Explorer builds the network on
+    # page load. No POST and no per-process network_id cache, so the link works on any instance.
+    filter_param = urllib.parse.quote(json.dumps({"gene_names": gene_symbols}))
     return base_url.rstrip("/") + f"/explorer?filter={filter_param}"
 
 
@@ -178,8 +164,6 @@ def main(argv=None):
             print("Error: need at least two gene symbols because the network needs a pair to connect.",
                   file=sys.stderr)
             return 1
-
-        network_id = build_network(genes, args.base_url)
     except EgressBlocked as e:
         print(str(e), file=sys.stderr)
         return 3
@@ -187,7 +171,7 @@ def main(argv=None):
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    url = explorer_url(network_id, args.base_url)
+    url = explorer_url(genes, args.base_url)
     print(url)
 
     if args.open_browser:
