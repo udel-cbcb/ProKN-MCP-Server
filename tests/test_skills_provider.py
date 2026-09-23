@@ -67,6 +67,38 @@ def test_skill_manifest_lists_expected_files():
 
 
 # ---------------------------------------------------------------------------
+# Prompts: each skill is also selectable from client "/" menus
+# ---------------------------------------------------------------------------
+
+def test_both_skills_are_exposed_as_prompts():
+    async def check():
+        async with Client(mcpserver.mcp) as c:
+            return {p.name for p in await c.list_prompts()}
+
+    names = _run(check())
+    missing = EXPECTED_SKILLS - names
+    assert not missing, f"skills not exposed as prompts: {sorted(missing)}"
+
+
+def test_prompt_body_is_skill_content_without_frontmatter():
+    async def check():
+        async with Client(mcpserver.mcp) as c:
+            prompts = {p.name: p for p in await c.list_prompts()}
+            out = {}
+            for name in EXPECTED_SKILLS:
+                result = await c.get_prompt(name, {})
+                # first user message text
+                msg = result.messages[0]
+                out[name] = msg.content.text if hasattr(msg.content, "text") else str(msg.content)
+            return out
+
+    bodies = _run(check())
+    for name, body in bodies.items():
+        assert not body.lstrip().startswith("---"), f"{name}: frontmatter not stripped"
+        assert "# ProKN" in body, f"{name}: skill body missing"
+
+
+# ---------------------------------------------------------------------------
 # Contract: every tool referenced by a skill must be registered on the server
 # ---------------------------------------------------------------------------
 

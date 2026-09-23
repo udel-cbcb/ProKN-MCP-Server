@@ -71,6 +71,34 @@ mcp.add_middleware(AliasNormalizationMiddleware())
 # a missing skills/ folder is logged and skipped by the provider, not fatal.
 mcp.add_provider(SkillsDirectoryProvider(roots=Path(__file__).resolve().parent / "skills"))
 
+# Also surface each skill as an MCP prompt, so clients that show only tools and
+# prompts (e.g. Claude Desktop's "/" menu) can offer the methodology directly.
+# The prompt body is the SKILL.md file itself (frontmatter stripped) — skills/ stays
+# the single source of truth; these wrappers just read it at registration time.
+_SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
+
+
+def _skill_prompt_body(name: str) -> str:
+    """SKILL.md content for the named skill, without the YAML frontmatter."""
+    text = (_SKILLS_ROOT / name / "SKILL.md").read_text(encoding="utf-8")
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            text = text[end + 4:]
+    return text.strip() + "\n"
+
+
+@mcp.prompt(name="prokn-analysis", description="Investigate a biological question with evidence from ProKN (resolve entities, pull relationships/pathways/subgraphs, cite edge provenance)")
+def prokn_analysis_prompt() -> str:
+    """The prokn-analysis skill as a selectable prompt."""
+    return _skill_prompt_body("prokn-analysis")
+
+
+@mcp.prompt(name="prokn-explorer", description="Build a shareable ProKN Explorer network link from gene symbols or protein IDs")
+def prokn_explorer_prompt() -> str:
+    """The prokn-explorer skill as a selectable prompt."""
+    return _skill_prompt_body("prokn-explorer")
+
 # Query log for reproducibility records.
 # QueryLogMiddleware appends every tool call to a per-session log, so a reproducibility record
 # is built from what actually ran, not the model's memory. Each client session gets its own log
@@ -955,12 +983,14 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if transport_arg in ["http", "sse", "streamable-http"]:
-        print(f"Starting ProKN MCP Server on Streamable HTTP (port 8000, path /mcp)")
-        
+        # Port 8000 by default; override with PROKN_MCP_PORT when it's already taken
+        port = int(os.environ.get("PROKN_MCP_PORT", "8000"))
+        print(f"Starting ProKN MCP Server on Streamable HTTP (port {port}, path /mcp)")
+
         mcp.run(
-            transport="streamable-http", 
-            host="0.0.0.0", 
-            port=8000, 
+            transport="streamable-http",
+            host="0.0.0.0",
+            port=port,
             path="/mcp"
         )
     else:
