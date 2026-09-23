@@ -1,16 +1,6 @@
 ---
 name: prokn-analysis
-description: >-
-  Methodology layer over the ProKN MCP server's data tools: investigate a biological question by
-  resolving entities, pulling the relevant relationships/pathways/subgraphs, citing the evidence on
-  each edge, and (when useful) handing the resulting gene set to prokn-explorer for a network view.
-  Triggers: "what connects these proteins", "analyze/investigate this gene/drug/disease in ProKN",
-  "what does ProKN say about X", "find the kinases/pathways/targets for ...", "how is X related to
-  Y", "work out / figure out / determine which ... in ProKN", "which proteins does a drug inhibit
-  or target", or any question wanting facts and evidence from the graph. Also handles a two-part
-  request that first works something out and THEN visualizes it (e.g. "work out X's targets, then
-  show them as a network"): this skill does the investigation and hands the set to prokn-explorer.
-  NOT for a bare "render/show these genes as a network" (that's prokn-explorer alone).
+description: 'Methodology layer over the ProKN MCP server''s data tools: investigate a biological question by resolving entities, pulling the relevant relationships/pathways/subgraphs, citing the evidence on each edge, and (when useful) handing the resulting gene set to prokn-explorer for a network view. Triggers: "what connects these proteins", "analyze/investigate this gene/drug/disease in ProKN", "what does ProKN say about X", "find the kinases/pathways/targets for ...", "how is X related to Y", "work out / figure out / determine which ... in ProKN", "which proteins does a drug inhibit or target", or any question wanting facts and evidence from the graph. Also handles a two-part request that first works something out and THEN visualizes it (e.g. "work out X''s targets, then show them as a network"): this skill does the investigation and hands the set to prokn-explorer. NOT for a bare "render/show these genes as a network" (that''s prokn-explorer alone).'
 compatibility: >-
   Requires the ProKN MCP server (its data tools) to be connected. Pairs with the prokn-explorer
   skill for the optional visualization step.
@@ -103,7 +93,7 @@ Every run ends with a saved record, not a prose summary in the chat. At the end,
 - `question`: the question.
 - `findings`: the findings, each with its evidence (see section 6). Markdown is fine.
 - `skipped`: any branch you skipped, one per line with a one-line reason.
-- `skills`: the skills used, e.g. `prokn-analysis v0.3.0, prokn-explorer v0.2.0`.
+- `skills`: the skills used, e.g. `prokn-analysis v0.3.0, prokn-explorer v0.3.0`.
 
 The tool fills in the tool calls that actually ran (from the query log) and the instance/date, then
 writes a `.md` file to disk (also served at `record://session/latest`) and returns its path. Do not
@@ -147,7 +137,7 @@ Short, named tool chains for common questions. Full steps in `references/analysi
    LINCS P100 sites it lowers.
 4. `get_proteins_catalyzing_sites(phosphosites=[...])` for the kinases, keeping the `evidence`.
 5. Resolve the kinases to gene symbols and call `get_explorer_network` for the link.
-6. `create_reproducibility_record(question=..., findings=..., skills="prokn-analysis v0.3.0, prokn-explorer v0.2.0")`
+6. `create_reproducibility_record(question=..., findings=..., skills="prokn-analysis v0.3.0, prokn-explorer v0.3.0")`
    to save the record; end with the saved file path and a quick reproducibility summary, noting any
    sites with no known kinase.
 

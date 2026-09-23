@@ -9,10 +9,11 @@ WORKDIR /app
 COPY ./requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the server code and queries
+# Copy the server code, queries, and agent skills (exposed as skill:// resources)
 COPY ./mcpserver.py .
 COPY ./queries.py .
 COPY ./arg_normalization.py .
+COPY ./skills ./skills
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

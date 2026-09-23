@@ -1,5 +1,7 @@
 import os
+from pathlib import Path
 from fastmcp import FastMCP
+from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from arg_normalization import AliasNormalizationMiddleware
 import neo4j
 from queries import (
@@ -61,6 +63,13 @@ mcp = FastMCP(
 )
 
 mcp.add_middleware(AliasNormalizationMiddleware())
+
+# Expose the agent skills in ./skills as MCP resources (skill://<name>/SKILL.md, a
+# _manifest, and supporting files via resource templates), so any MCP client can
+# discover and read the skill methodology without installing the .skill bundles.
+# Resolved relative to this file so it works regardless of the working directory;
+# a missing skills/ folder is logged and skipped by the provider, not fatal.
+mcp.add_provider(SkillsDirectoryProvider(roots=Path(__file__).resolve().parent / "skills"))
 
 # Query log for reproducibility records.
 # QueryLogMiddleware appends every tool call to a per-session log, so a reproducibility record
@@ -304,7 +313,7 @@ def create_reproducibility_record(
     question: Annotated[str, Field(description="The question this analysis answered.")] = "",
     findings: Annotated[str, Field(description="The findings, with evidence (markdown allowed).")] = "",
     skipped: Annotated[str, Field(description="Branches you skipped and why, one per line.")] = "",
-    skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-analysis v0.3.0, prokn-explorer v0.2.0'.")] = "",
+    skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-analysis v0.3.0, prokn-explorer v0.3.0'.")] = "",
 ) -> str:
     """Build the reproducibility record from this session's query log and write it to a .md file.
 

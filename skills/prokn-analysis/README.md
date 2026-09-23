@@ -22,7 +22,7 @@ skills/
         └── pitfalls.md         # recurring cross-tool mistakes and fixes
 ```
 
-Status: early (v0.1.0). The core flow, tool map, and pitfalls are in place; expect it to grow as
+Status: early (v0.3.0). The core flow, tool map, and pitfalls are in place; expect it to grow as
 we use it.
 
 ## Requirements
@@ -50,6 +50,24 @@ zip -r ../prokn-analysis.skill SKILL.md references -x '*/.DS_Store'
 - **Cowork:** open the `.skill` file and click "Save skill".
 - **Claude Code:** copy the `prokn-analysis/` folder into `~/.claude/skills/` (personal) or
   `.claude/skills/` in a repo (project-scoped). No packaging needed there.
+
+## Via the ProKN MCP server
+
+No install needed: the server exposes this skill as MCP resources from the repo's `skills/`
+folder (see the root README's Agent Skills section):
+
+- `skill://prokn-analysis/SKILL.md` — the skill definition
+- `skill://prokn-analysis/_manifest` — file listing (path, size, sha256)
+- `skill://prokn-analysis/<path>` — supporting files, e.g. `references/tool-map.md`
+  or `references/analysis-menu.md`
+
+## Maintainer rules
+
+- **`description` stays on a single line** in `SKILL.md` frontmatter (single-quoted YAML).
+  FastMCP's parser can't read `description: >-` folds and would expose `>-` as the description.
+- **Bump `metadata.version`** in `SKILL.md` when the skill changes, and update the
+  `prokn-analysis  vX.Y.Z` / `prokn-explorer  vX.Y.Z` strings in this skill's reproducibility
+  examples (sections 5 and 8) to match both skills' current versions.
 
 ## Note
 

@@ -1,17 +1,6 @@
 ---
 name: prokn-explorer
-description: >-
-  Turn a list of gene symbols (or other protein IDs) into a ProKN network and a shareable
-  Explorer link. Builds a self-contained URL that carries the gene set (filter with
-  gene_names); the Explorer computes the subnetwork on page load, so the link works on any
-  instance. Non-gene IDs (UniProt accessions, RefSeq, ...) are mapped to gene symbols first.
-  Triggers: "show / display / view these genes or proteins in ProKN", "visualize a 
-  gene or protein set as a network or graph", "network view of these genes", 
-  "make a network / subnetwork from this list", "map or show the relationships between
-  these proteins as a network", "visualize how these genes are related in ProKN",
-  "explore this set of genes or proteins in ProKN". Also accepts UniProt accessions, RefSeq, Ensembl 
-  and other IDs (mapped to gene symbols first). NOT for reading facts as text (a protein's targets, kinases,
-  pathways, evidence, or a single entity's relationships). That belongs to the ProKN MCP data tools.
+description: 'Turn a list of gene symbols (or other protein IDs) into a ProKN network and a shareable Explorer link. Builds a self-contained URL that carries the gene set (filter with gene_names); the Explorer computes the subnetwork on page load, so the link works on any instance. Non-gene IDs (UniProt accessions, RefSeq, ...) are mapped to gene symbols first. Triggers: "show / display / view these genes or proteins in ProKN", "visualize a gene or protein set as a network or graph", "network view of these genes", "make a network / subnetwork from this list", "map or show the relationships between these proteins as a network", "visualize how these genes are related in ProKN", "explore this set of genes or proteins in ProKN". Also accepts UniProt accessions, RefSeq, Ensembl and other IDs (mapped to gene symbols first). NOT for reading facts as text (a protein''s targets, kinases, pathways, evidence, or a single entity''s relationships). That belongs to the ProKN MCP data tools.'
 compatibility: >-
   Targets a running ProKN web instance. Requires network
   access and Python 3 (standard library only). This skill renders a network;

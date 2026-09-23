@@ -4,6 +4,7 @@ This folder contains the code for an MCP server for Protein Knowledge Network (P
 
 ## Index:
 - [Local Development](#local-development)
+- [Agent Skills](#agent-skills)
 - [Testing](#testing)
 - [Build Docker Image](#build-docker-image)
 - [Usage](#usage)
@@ -47,6 +48,25 @@ For example, the path for the MCP server config for the Antigravity MCP client i
 }
 ```
 
+## Agent Skills
+
+The server exposes the agent skills in [`skills/`](./skills) (`prokn-analysis`, `prokn-explorer`) as MCP resources via FastMCP's `SkillsDirectoryProvider`, so any connected MCP client can discover and read them — no `.skill` install needed:
+
+- `skill://<name>/SKILL.md` — the skill definition (markdown)
+- `skill://<name>/_manifest` — JSON file listing (path, size, sha256) of everything in the skill folder
+- `skill://<name>/<path>` (resource template) — supporting files, e.g. `skill://prokn-analysis/references/tool-map.md` or `skill://prokn-explorer/scripts/prokn_explorer.py`
+
+Only subfolders of `skills/` containing a `SKILL.md` are picked up; the committed `.skill` zip bundles are ignored. The `skills/` folder must be present next to `mcpserver.py` (the Docker image copies it). FastMCP clients can enumerate them with `fastmcp.utilities.skills.list_skills()` / `download_skill()`; other clients can just list and read resources.
+
+### Editing skills
+
+When you change anything under `skills/`:
+
+1. **Keep `description` on a single line** in the `SKILL.md` frontmatter (single-quoted YAML). FastMCP's line-based frontmatter parser can't read `description: >-` folded blocks — they'd be exposed as the literal string `>-`.
+2. **Rebuild the bundle**: run the skill's `build.sh` and commit the updated `.skill` (the bundles in `skills/` are generated from the source folders).
+3. **Keep version references in sync**: any `prokn-*  vX.Y.Z` string in prose (skill bodies, READMEs, the `skills` field example in `mcpserver.py`) must match the `metadata.version` in that skill's `SKILL.md`. Both skills are currently v0.3.0.
+4. **Tool renames are guarded**: `tests/test_skills_provider.py` fails if a skill references a tool the server no longer exposes.
+
 ## Testing
 
 Tests use `pytest` and are split into a fast offline tier (no database) and a live tier that queries Neo4j
@@ -78,6 +98,8 @@ python -m pytest --cov=. -v
 Layout:
 - `tests/test_arg_normalization.py` : offline, the argument-normalization middleware
 - `tests/test_tools_offline.py` : offline, tool wrappers with the Neo4j layer mocked
+- `tests/test_tool_routing.py` : offline, prompt → tool routing signals in descriptions
+- `tests/test_skills_provider.py` : offline, skills exposed as `skill://` resources + skill↔server tool contract
 - `tests/test_tools_live.py` : live, real Neo4j (marked `live`)
 
 ## Build Docker Image
@@ -95,7 +117,7 @@ docker run -d \
 ```
 
 3. Run `docker container ls` and wait for the STATUS to become healthy.
-4. Add the same config as in Step 4 of Local Development to your MCP Client's MCP server list.
+4. Add the same config as in Step 3 of Local Development to your MCP Client's MCP server list.
 5. Test the MCP server by running any query on the MCP Client. To see the logs: run `docker logs prokn-mcp-server` in a new terminal session and verify that the server is working as expected.
 
 ## Usage
