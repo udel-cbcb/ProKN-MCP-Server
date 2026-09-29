@@ -325,5 +325,18 @@ def test_create_reproducibility_record_writes_file(tmp_path, monkeypatch):
     text = files[0].read_text()
     assert "get_drugs_mechanisms" in text        # tool call pulled from the log
     assert "## Findings" in text
+    assert "## Literature" not in text           # no literature section when field omitted
     # the resource serves the same saved record
     assert mcpserver.reproducibility_record_resource() == text
+
+
+def test_create_reproducibility_record_literature_section(tmp_path, monkeypatch):
+    monkeypatch.setenv("PROKN_RECORD_DIR", str(tmp_path))
+    mcpserver.reset_query_log()
+    mcpserver.create_reproducibility_record(
+        question="lit-backed?",
+        findings="graph edge",
+        literature='search_articles("lapatinib AND EGFR"); PMIDs 22178589, 38986734')
+    text = list(tmp_path.glob("prokn-record-*.md"))[0].read_text()
+    assert "## Literature (PubMed)" in text       # literature field becomes its own section
+    assert "22178589" in text

@@ -314,7 +314,7 @@ def get_query_log() -> list[dict] | str:
 _RECORDS: dict[str, str] = {}
 
 
-def _build_record(session_key, question, findings, skipped, skills):
+def _build_record(session_key, question, findings, skipped, skills, literature=""):
     """Format a markdown reproducibility record from the session's query log + the given fields."""
     log = _QUERY_LOGS.get(session_key, [])
     lines = ["# ProKN reproducibility record", ""]
@@ -331,6 +331,10 @@ def _build_record(session_key, question, findings, skipped, skills):
         lines.append("(query log empty; call reset_query_log at the start of an analysis)")
     if findings:
         lines += ["", "## Findings", findings]
+    if literature:
+        # PubMed runs on a separate MCP server, so its calls aren't in the query log above.
+        # Record the queries and PMIDs here so the literature step is reproducible too.
+        lines += ["", "## Literature (PubMed)", literature]
     if skipped:
         lines += ["", "## Skipped", skipped]
     return "\n".join(lines) + "\n"
@@ -342,6 +346,7 @@ def create_reproducibility_record(
     findings: Annotated[str, Field(description="The findings, with evidence (markdown allowed).")] = "",
     skipped: Annotated[str, Field(description="Branches you skipped and why, one per line.")] = "",
     skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-analysis v0.3.0, prokn-explorer v0.3.0'.")] = "",
+    literature: Annotated[str, Field(description="Literature step, if any: the exact PubMed queries run and the PMIDs cited (markdown allowed). PubMed is a separate MCP server so its calls are NOT in the query log; pass them here so the review is reproducible.")] = "",
 ) -> str:
     """Build the reproducibility record from this session's query log and write it to a .md file.
 
@@ -351,11 +356,14 @@ def create_reproducibility_record(
     the whole record into the chat; give the user the path plus a quick one- or two-line summary
     (how many tool calls, which sources).
 
+    Pass `literature` when a prokn-literature step ran: the query log only captures ProKN tool
+    calls, so the PubMed queries and PMIDs must be handed in here to be recorded.
+
     The file goes to PROKN_RECORD_DIR if set, otherwise a `prokn_records/` folder in the server's
     working directory; on a remote/hosted server it lands on the server, not your machine.
     """
     key = _session_key()
-    md = _build_record(key, question, findings, skipped, skills)
+    md = _build_record(key, question, findings, skipped, skills, literature)
     _RECORDS[key] = md
     n = len(_QUERY_LOGS.get(key, []))
 

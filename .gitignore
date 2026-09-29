@@ -11,6 +11,7 @@ venv/
 *.skill
 !skills/prokn-explorer.skill
 !skills/prokn-analysis.skill
+!skills/prokn-literature.skill
 
 # generated benchmark output
 benchmarks/results.md
