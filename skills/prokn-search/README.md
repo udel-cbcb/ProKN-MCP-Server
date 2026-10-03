@@ -1,25 +1,25 @@
-# prokn-analysis
+# prokn-search
 
 An Agent Skill that teaches a model how to investigate a biological question with the ProKN MCP
 server: resolve entities, pull the relevant relationships/pathways/subgraphs, cite the evidence on
 each edge, and (when useful) hand the resulting gene set to `prokn-explorer` for a network picture.
 
-It's the methodology layer over ProKN's data tools, not a replacement for them. See `SKILL.md` for
+It sits on top of ProKN's data tools and describes how to use them together. See `SKILL.md` for
 the flow and operating rules. Pairs with the `prokn-explorer` skill for the visualization step.
 
 ```
 skills/
-├── prokn-analysis.skill        # prebuilt bundle (built here by build.sh), committed for install
-└── prokn-analysis/
-    ├── SKILL.md                # the skill definition (what an agent reads)
-    ├── README.md               # this file
-    ├── build.sh                # rebuilds the bundle into ../ (the skills/ dir)
-    └── references/             # extra detail, loaded on demand
-        ├── tool-map.md         # which tool answers which question + common chains
-        ├── analysis-menu.md    # named recipes (kinase-substrate, crosstalk, repurposing, ...)
-        ├── cross-source.md     # combining ProKN's source datasets, keeping provenance separate
-        ├── evidence.md         # per-source citation guide and evidence tiers
-        └── pitfalls.md         # recurring cross-tool mistakes and fixes
+├── prokn-search.skill         # prebuilt bundle (built here by build.sh), committed for install
+└── prokn-search/
+    ├── SKILL.md               # the skill definition (what an agent reads)
+    ├── README.md              # this file
+    ├── build.sh               # rebuilds the bundle into ../ (the skills/ dir)
+    └── references/            # extra detail, loaded on demand
+        ├── tool-map.md        # which tool answers which question + common chains
+        ├── search-recipes.md  # named recipes (kinase-substrate, crosstalk, repurposing, ...)
+        ├── cross-source.md    # combining ProKN's source datasets, keeping provenance separate
+        ├── evidence.md        # per-source citation guide and evidence tiers
+        └── pitfalls.md        # recurring cross-tool mistakes and fixes
 ```
 
 Status: early (v0.3.0). The core flow, tool map, and pitfalls are in place; expect it to grow as
@@ -42,13 +42,13 @@ to `.skill`. From inside this folder, run the build script:
 Or by hand:
 
 ```bash
-zip -r ../prokn-analysis.skill SKILL.md references -x '*/.DS_Store'
+zip -r ../prokn-search.skill SKILL.md references -x '*/.DS_Store'
 ```
 
 ## Installing
 
 - **Cowork:** open the `.skill` file and click "Save skill".
-- **Claude Code:** copy the `prokn-analysis/` folder into `~/.claude/skills/` (personal) or
+- **Claude Code:** copy the `prokn-search/` folder into `~/.claude/skills/` (personal) or
   `.claude/skills/` in a repo (project-scoped). No packaging needed there.
 
 ## Via the ProKN MCP server
@@ -56,21 +56,21 @@ zip -r ../prokn-analysis.skill SKILL.md references -x '*/.DS_Store'
 No install needed: the server exposes this skill as MCP resources from the repo's `skills/`
 folder (see the root README's Agent Skills section):
 
-- `skill://prokn-analysis/SKILL.md` — the skill definition
-- `skill://prokn-analysis/_manifest` — file listing (path, size, sha256)
-- `skill://prokn-analysis/<path>` — supporting files, e.g. `references/tool-map.md`
-  or `references/analysis-menu.md`
+- `skill://prokn-search/SKILL.md`: the skill definition
+- `skill://prokn-search/_manifest`: file listing (path, size, sha256)
+- `skill://prokn-search/<path>`: supporting files, e.g. `references/tool-map.md`
+  or `references/search-recipes.md`
 
 ## Maintainer rules
 
 - **`description` stays on a single line** in `SKILL.md` frontmatter (single-quoted YAML).
   FastMCP's parser can't read `description: >-` folds and would expose `>-` as the description.
 - **Bump `metadata.version`** in `SKILL.md` when the skill changes, and update the
-  `prokn-analysis  vX.Y.Z` / `prokn-explorer  vX.Y.Z` strings in this skill's reproducibility
+  `prokn-search  vX.Y.Z` / `prokn-explorer  vX.Y.Z` strings in this skill's reproducibility
   examples (sections 5 and 8) to match both skills' current versions.
 
 ## Note
 
-The committed `prokn-analysis.skill` (in the parent `skills/` folder) is built from the source in
+The committed `prokn-search.skill` (in the parent `skills/` folder) is built from the source in
 this folder (`SKILL.md`, `references/`), so run `./build.sh` and re-commit the new `.skill`
 whenever you change those.

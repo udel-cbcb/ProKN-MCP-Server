@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Rebuild prokn-analysis.skill from the source in this folder.
+# Rebuild prokn-search.skill from the source in this folder.
 # Run it after editing SKILL.md or references/, then commit the new .skill.
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 # write the bundle to the parent skills/ directory so all bundles sit together
-out="../prokn-analysis.skill"
+out="../prokn-search.skill"
 
 # clear the old bundle so it isn't zipped into itself
 rm -f "$out"

@@ -29,6 +29,7 @@ from queries import (
 )
 import sys
 import time
+from datetime import datetime
 import re
 import json
 import urllib.request
@@ -47,7 +48,7 @@ mcp = FastMCP(
         1. Prefer specific task tools: Each answers one biological question (e.g. a drug's
             targets, a site's kinase, an entity's neighbors, paths between proteins). Use the
             raw query tool (execute_read_only_cypher) only when no task tool can express the
-            question. It is a last resort, not a shortcut.
+            question.
         2. Entities resolve automatically: The tools accept entities such as common names, gene 
             symbols, accessions and IDs and match them for you. If a tool reports it could not 
             find an entity, follow the guidance it returns to resolve the name and retry. Do not 
@@ -55,7 +56,7 @@ mcp = FastMCP(
         3. Cite evidence: ProKN stores provenance on relationships. When you report a
             connection, cite the evidence from the edge: list PMIDs if present, otherwise name
             the source database (SAB / dcc). If an edge carries no provenance, say so.
-        4. Present complete, honest results: Report all biologically relevant findings; for
+        4. Present complete results: Report all biologically relevant findings; for
             large result sets, summarize and surface the most significant rows rather than
             silently dropping data. Keep domain abbreviations as written.
         5. Briefly explain your approach in biological terms before acting.
@@ -88,16 +89,22 @@ def _skill_prompt_body(name: str) -> str:
     return text.strip() + "\n"
 
 
-@mcp.prompt(name="prokn-analysis", description="Investigate a biological question with evidence from ProKN (resolve entities, pull relationships/pathways/subgraphs, cite edge provenance)")
-def prokn_analysis_prompt() -> str:
-    """The prokn-analysis skill as a selectable prompt."""
-    return _skill_prompt_body("prokn-analysis")
+@mcp.prompt(name="prokn-search", description="Investigate a biological question with evidence from ProKN (resolve entities, pull relationships/pathways/subgraphs, cite edge provenance)")
+def prokn_search_prompt() -> str:
+    """The prokn-search skill as a selectable prompt."""
+    return _skill_prompt_body("prokn-search")
 
 
 @mcp.prompt(name="prokn-explorer", description="Build a shareable ProKN Explorer network link from gene symbols or protein IDs")
 def prokn_explorer_prompt() -> str:
     """The prokn-explorer skill as a selectable prompt."""
     return _skill_prompt_body("prokn-explorer")
+
+
+@mcp.prompt(name="prokn-literature-review", description="Review the PubMed literature on a ProKN gene/protein/drug set or question, reconcile it with the graph's PMIDs, and optionally draw cited inferences (needs the PubMed MCP)")
+def prokn_literature_review_prompt() -> str:
+    """The prokn-literature-review skill as a selectable prompt."""
+    return _skill_prompt_body("prokn-literature-review")
 
 # Query log for reproducibility records.
 # QueryLogMiddleware appends every tool call to a per-session log, so a reproducibility record
@@ -131,24 +138,58 @@ def _session_log(ctx=None):
     return _QUERY_LOGS.setdefault(_session_key(ctx), [])
 
 
+def _now_iso() -> str:
+    """Current local time as ISO 8601 with UTC offset, e.g. 2026-09-30T10:12:03-04:00."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _fmt_ms(ms) -> str:
+    """Human-readable duration: '4.2 ms' / '142 ms' under a second, else '3.21 s'."""
+    if ms is None:
+        return "n/a"
+    if ms < 10:
+        return f"{ms:.1f} ms"
+    return f"{ms:.0f} ms" if ms < 1000 else f"{ms / 1000:.2f} s"
+
+
 try:
     from fastmcp.server.middleware import Middleware as _Middleware
 
     class QueryLogMiddleware(_Middleware):
-        """Record each tool call (name + arguments) in the caller's session log."""
+        """Record each tool call (name, arguments, start time, duration, status) in the
+        caller's session log.
+
+        The entry is appended before the call runs so steps stay in call order, then
+        `duration_ms` and `status` are filled in when it returns. Duration is server-side
+        wall time for the whole tool call (Neo4j query plus any HTTP it makes, e.g. PIR ID
+        mapping); it does not include the client's or model's time.
+        """
 
         async def on_call_tool(self, context, call_next):
             msg = getattr(context, "message", None)
             name = getattr(msg, "name", None)
-            if name and name not in _LOG_SKIP:
-                log = _session_log(getattr(context, "fastmcp_context", None))
-                log.append({
-                    "step": len(log) + 1,
-                    "tool": name,
-                    "arguments": getattr(msg, "arguments", {}),
-                    "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
-            return await call_next(context)
+            if not name or name in _LOG_SKIP:
+                return await call_next(context)
+            log = _session_log(getattr(context, "fastmcp_context", None))
+            entry = {
+                "step": len(log) + 1,
+                "tool": name,
+                "arguments": getattr(msg, "arguments", {}),
+                "time": _now_iso(),
+                "duration_ms": None,
+                "status": "running",
+            }
+            log.append(entry)
+            t0 = time.perf_counter()
+            try:
+                result = await call_next(context)
+                entry["status"] = "ok"
+                return result
+            except Exception:
+                entry["status"] = "error"
+                raise
+            finally:
+                entry["duration_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
     mcp.add_middleware(QueryLogMiddleware())
 except Exception:
@@ -288,8 +329,8 @@ def search_entities(
 def reset_query_log() -> str:
     """Clear this session's tool-call log.
 
-    USE THIS TOOL at the START of an analysis so the reproducibility record only covers
-    the calls for that analysis.
+    USE THIS TOOL at the START of an investigation so the reproducibility record only covers
+    the calls for that investigation.
     """
     _session_log().clear()
     return "Query log cleared."
@@ -299,12 +340,13 @@ def reset_query_log() -> str:
 def get_query_log() -> list[dict] | str:
     """Return this session's tool calls since the last reset, in order.
 
-    USE THIS TOOL at the END of an analysis to build the reproducibility record from what
-    actually ran. Each row is {step, tool, arguments, time}.
+    USE THIS TOOL at the END of an investigation to build the reproducibility record from what
+    actually ran. Each row is {step, tool, arguments, time, duration_ms, status}: `time` is
+    the ISO 8601 start time with UTC offset, `duration_ms` the server-side run time.
     """
     log = _session_log()
     if not log:
-        return ("Query log is empty. Call reset_query_log at the start of an analysis; "
+        return ("Query log is empty. Call reset_query_log at the start of an investigation; "
                 "the tools you use after that are recorded here.")
     return list(log)
 
@@ -320,15 +362,31 @@ def _build_record(session_key, question, findings, skipped, skills, literature="
     lines = ["# ProKN reproducibility record", ""]
     if question:
         lines.append(f"**Question:** {question}")
-    lines.append(f"**Instance / date:** {PROKN_WEB_BASE_URL} / {time.strftime('%Y-%m-%d')}")
+    lines.append(f"**Instance:** {PROKN_WEB_BASE_URL}")
+    lines.append(f"**Record generated:** {_now_iso()}")
     if skills:
         lines.append(f"**Skills:** {skills}")
+    timed = [r["duration_ms"] for r in log if isinstance(r.get("duration_ms"), (int, float))]
+    if log:
+        lines.append(f"**Tool calls:** {len(log)}, first started {log[0].get('time', 'n/a')}")
+    if timed:
+        lines.append(f"**Total tool run time:** {_fmt_ms(sum(timed))} "
+                     f"(slowest: {_fmt_ms(max(timed))})")
     lines += ["", "## Tool calls"]
     if log:
+        lines.append("Start time and server-side run time for each call (Neo4j query plus any "
+                     "HTTP it makes; excludes client/model time).")
+        lines.append("")
         for r in log:
-            lines.append(f"{r['step']}. `{r['tool']}({json.dumps(r.get('arguments', {}))})`")
+            call = f"{r['step']}. `{r['tool']}({json.dumps(r.get('arguments', {}))})`"
+            meta = [r.get("time")] if r.get("time") else []
+            if "duration_ms" in r:
+                meta.append(_fmt_ms(r.get("duration_ms")))
+            if r.get("status") not in (None, "ok"):
+                meta.append(r["status"])
+            lines.append(call + (f" — {', '.join(meta)}" if meta else ""))
     else:
-        lines.append("(query log empty; call reset_query_log at the start of an analysis)")
+        lines.append("(query log empty; call reset_query_log at the start of an investigation)")
     if findings:
         lines += ["", "## Findings", findings]
     if literature:
@@ -342,21 +400,21 @@ def _build_record(session_key, question, findings, skipped, skills, literature="
 
 @mcp.tool()
 def create_reproducibility_record(
-    question: Annotated[str, Field(description="The question this analysis answered.")] = "",
+    question: Annotated[str, Field(description="The question this investigation answered.")] = "",
     findings: Annotated[str, Field(description="The findings, with evidence (markdown allowed).")] = "",
     skipped: Annotated[str, Field(description="Branches you skipped and why, one per line.")] = "",
-    skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-analysis v0.3.0, prokn-explorer v0.3.0'.")] = "",
-    literature: Annotated[str, Field(description="Literature step, if any: the exact PubMed queries run and the PMIDs cited (markdown allowed). PubMed is a separate MCP server so its calls are NOT in the query log; pass them here so the review is reproducible.")] = "",
+    skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-search v0.3.0, prokn-explorer v0.3.0'.")] = "",
+    literature: Annotated[str, Field(description="Literature step, if any: the exact PubMed queries run and the PMIDs cited (markdown allowed). PubMed is a separate MCP server so its calls are not in the query log; pass them here so the review is reproducible.")] = "",
 ) -> str:
     """Build the reproducibility record from this session's query log and write it to a .md file.
 
-    USE THIS TOOL at the END of an analysis. It assembles the tool calls that actually ran (from
+    USE THIS TOOL at the END of an investigation. It assembles the tool calls that actually ran (from
     the query log) plus the fields you pass, and writes a markdown file to disk (also served as the
     resource record://session/latest). Returns a short confirmation with the file path. Don't paste
     the whole record into the chat; give the user the path plus a quick one- or two-line summary
     (how many tool calls, which sources).
 
-    Pass `literature` when a prokn-literature step ran: the query log only captures ProKN tool
+    Pass `literature` when a prokn-literature-review step ran: the query log only captures ProKN tool
     calls, so the PubMed queries and PMIDs must be handed in here to be recorded.
 
     The file goes to PROKN_RECORD_DIR if set, otherwise a `prokn_records/` folder in the server's
@@ -389,7 +447,7 @@ def reproducibility_record_resource() -> str:
     md = _RECORDS.get(_session_key())
     if md:
         return md
-    return ("# ProKN reproducibility record\n\nNo record yet. Run an analysis and call "
+    return ("# ProKN reproducibility record\n\nNo record yet. Run an investigation and call "
             "create_reproducibility_record to build one.\n")
 
 # ---------------------------------------------------------------------------

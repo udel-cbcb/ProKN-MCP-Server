@@ -35,7 +35,7 @@ Resolve names first with `search_entities`, then pick the specific tool below. U
   `get_pathways_between_protein_sets` or `get_subgraph` to see what they share.
 - **Narrow a protein list to kinases.** any protein list -> `filter_proteins_by_ec_number`
   (`2.7.*`).
-- **Analysis to picture.** once you have a gene/protein set, resolve to gene symbols and call
+- **Search to picture.** once you have a gene/protein set, resolve to gene symbols and call
   `get_explorer_network` for an Explorer link.
 
 ## Picking between the neighborhood tools

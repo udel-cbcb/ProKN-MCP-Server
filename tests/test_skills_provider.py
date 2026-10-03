@@ -1,7 +1,7 @@
 """Offline tests for the agent-skill resources and the skill<->server contract
 
 Covers two things that would silently break skills if they drifted:
-  1. Both skills in skills/ are exposed as skill:// resources (SKILL.md, manifest,
+  1. All skills in skills/ are exposed as skill:// resources (SKILL.md, manifest,
      supporting files) by the SkillsDirectoryProvider registered on the server.
   2. Every tool a skill references is actually registered on the server, so a
      renamed/removed tool can't strand the skills.
@@ -18,14 +18,26 @@ from fastmcp.utilities.skills import get_skill_manifest, list_skills
 import mcpserver
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
-EXPECTED_SKILLS = {"prokn-analysis", "prokn-explorer"}
+EXPECTED_SKILLS = {"prokn-search", "prokn-explorer", "prokn-literature-review"}
+
+# Tools that skills call on *other* MCP servers (prokn-literature-review drives the PubMed MCP).
+# They are not expected on the ProKN server, so the contract test ignores them.
+EXTERNAL_TOOLS = {
+    "search_articles",
+    "get_article_metadata",
+    "get_full_text_article",
+    "get_copyright_status",
+    "find_related_articles",
+    "lookup_article_by_citation",
+    "convert_article_ids",
+}
 
 
 def _run(coro):
     return asyncio.run(coro)
 
 
-def test_both_skills_are_discovered():
+def test_all_skills_are_discovered():
     async def check():
         async with Client(mcpserver.mcp) as c:
             skills = await list_skills(c)
@@ -42,7 +54,7 @@ def test_both_skills_are_discovered():
 def test_skill_resources_are_readable():
     async def check():
         async with Client(mcpserver.mcp) as c:
-            md = await c.read_resource("skill://prokn-analysis/SKILL.md")
+            md = await c.read_resource("skill://prokn-search/SKILL.md")
             main = md[0].text if isinstance(md, list) else md
             # supporting file via the resource template
             ref = await c.read_resource("skill://prokn-explorer/references/id-types.md")
@@ -50,7 +62,7 @@ def test_skill_resources_are_readable():
             return main, ref_text
 
     main, ref_text = _run(check())
-    assert main.startswith("---") and "# ProKN analysis" in main
+    assert main.startswith("---") and "# ProKN search" in main
     assert "GENENAME" in ref_text
 
 
@@ -70,7 +82,7 @@ def test_skill_manifest_lists_expected_files():
 # Prompts: each skill is also selectable from client "/" menus
 # ---------------------------------------------------------------------------
 
-def test_both_skills_are_exposed_as_prompts():
+def test_all_skills_are_exposed_as_prompts():
     async def check():
         async with Client(mcpserver.mcp) as c:
             return {p.name for p in await c.list_prompts()}
@@ -120,7 +132,7 @@ def test_skills_reference_only_registered_tools():
     registered = _run(check())
     referenced = _skill_referenced_tools()
     assert referenced, "no tool references found in skills — extraction regex broke"
-    missing = referenced - registered
+    missing = referenced - registered - EXTERNAL_TOOLS
     assert not missing, (
         f"skills reference tools the server does not expose: {sorted(missing)}"
     )

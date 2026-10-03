@@ -1,4 +1,4 @@
-# Analysis menu
+# Search recipes
 
 Named recipes for common ProKN questions. Each is a tool chain to run, not the only way to do it.
 Resolve names with `search_entities` first, and keep the `evidence` on every edge you report.

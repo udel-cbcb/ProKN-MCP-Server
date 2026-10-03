@@ -10,8 +10,8 @@ venv/
 # build artifacts: ignore stray .skill files but keep the committed distributables
 *.skill
 !skills/prokn-explorer.skill
-!skills/prokn-analysis.skill
-!skills/prokn-literature.skill
+!skills/prokn-search.skill
+!skills/prokn-literature-review.skill
 
 # generated benchmark output
 benchmarks/results.md

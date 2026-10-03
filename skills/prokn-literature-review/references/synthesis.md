@@ -1,6 +1,6 @@
 # Turning hits into a review
 
-How to go from a pile of PMIDs to a short, cited, honest write-up that lines up with the graph.
+How to go from a pile of PMIDs to a short, cited write-up that lines up with the graph.
 
 ## Group by claim, not by paper
 
@@ -13,11 +13,11 @@ one holds.
 
 - Every sentence that makes a factual claim carries its PMID(s).
 - Label the strength:
-  - **Curated primary experiment** (a direct experimental result; ProKN edge PMIDs are usually
-    here) - strongest.
-  - **Review or meta-analysis** - good for consensus, but it's secondary; cite the primary paper
+  - **Primary experimental study** (a direct experimental result; ProKN edge PMIDs are usually
+    here): strongest.
+  - **Review or meta-analysis**: good for consensus, but it's secondary; cite the primary paper
     when the claim is specific.
-  - **Preprint or computational prediction** - weakest; say so plainly and don't state it as
+  - **Preprint or computational prediction**: weakest; say so plainly and don't state it as
     settled.
 - One good primary paper beats three reviews that all cite it. Don't inflate a count by listing
   reviews of the same result.
@@ -34,7 +34,7 @@ For each connection, state which bucket it falls in and cite accordingly:
 
 Keep the two PMID sources labeled so curated edge evidence stays distinguishable from search hits.
 
-## Be honest about coverage
+## Report coverage
 
 - If a claim has no literature, say "no PubMed support found for X" rather than omitting it.
 - Name what you didn't search (a branch, a direction, a date range, non-English work) in one line.

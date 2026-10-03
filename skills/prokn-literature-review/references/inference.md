@@ -46,13 +46,13 @@ Propose A-C as a testable hypothesis.
 
 Grade every inference:
 
-- **High** — multiple independent primary studies agree; mechanism or measurement is direct; no
+- **High:** multiple independent primary studies agree; mechanism or measurement is direct; no
   serious contradiction.
-- **Moderate** — one solid primary study plus supporting reviews, or consistent but indirect
+- **Moderate:** one solid primary study plus supporting reviews, or consistent but indirect
   evidence; some gaps.
-- **Low** — single study, single species/cell line, indirect or correlational only, or a
+- **Low:** single study, single species/cell line, indirect or correlational only, or a
   computational prediction.
-- **Speculative** — a bridging hypothesis or a mechanistic guess with partial support. Always phrased
+- **Speculative:** a bridging hypothesis or a mechanistic guess with partial support. Always phrased
   as "to be tested".
 
 Say, in one clause, what evidence would move the grade up. A grade with no path to improve it isn't
@@ -60,7 +60,7 @@ useful.
 
 ## Evidence tiers (same as the review)
 
-Curated primary experiment > review/meta-analysis > preprint or computational prediction. ProKN edge
+Primary experimental study > review or meta-analysis > preprint or computational prediction. ProKN edge
 PMIDs are usually curated primary; a LINCS perturbation signal or a docking prediction is weaker and
 an inference built only on those cannot be more than Low.
 

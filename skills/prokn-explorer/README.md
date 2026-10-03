@@ -58,16 +58,16 @@ Select the contents (SKILL.md, scripts, references), not the folder.
 No install needed: the server exposes this skill as MCP resources from the repo's `skills/`
 folder (see the root README's Agent Skills section):
 
-- `skill://prokn-explorer/SKILL.md` — the skill definition
-- `skill://prokn-explorer/_manifest` — file listing (path, size, sha256)
-- `skill://prokn-explorer/<path>` — supporting files, e.g. `references/id-types.md`
+- `skill://prokn-explorer/SKILL.md`: the skill definition
+- `skill://prokn-explorer/_manifest`: file listing (path, size, sha256)
+- `skill://prokn-explorer/<path>`: supporting files, e.g. `references/id-types.md`
   or `scripts/prokn_explorer.py`
 
 When the server is connected, the skill's **primary run path** is its `get_explorer_network`
 tool; the bundled script below is the fallback for when there's no server.
 
 The `.skill` bundle and `SKILL.md` format are Anthropic-specific, but the actual capability is
-reachable three ways off Claude — via the MCP server (resources above), as a script, or as plain
+reachable three ways outside Claude: through the MCP server (resources above), as a script, or as plain
 instructions:
 
 1. **Run the script directly.** Any Python 3 environment can run it, no AI platform required:
@@ -86,7 +86,7 @@ instructions:
 - **`description` stays on a single line** in `SKILL.md` frontmatter (single-quoted YAML).
   FastMCP's parser can't read `description: >-` folds and would expose `>-` as the description.
 - **Bump `metadata.version`** in `SKILL.md` when the skill changes, and update any
-  `prokn-explorer  vX.Y.Z` cross-references elsewhere (e.g. `prokn-analysis/SKILL.md` cites this
+  `prokn-explorer  vX.Y.Z` cross-references elsewhere (e.g. `prokn-search/SKILL.md` cites this
   skill's version in its reproducibility examples).
 
 ## Note

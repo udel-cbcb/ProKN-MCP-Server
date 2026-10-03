@@ -1,6 +1,6 @@
 # Pitfalls and fixes
 
-Skim before finalizing an analysis. Each item is the flip side of an operating rule or a step in
+Skim before finalizing a search. Each item is the flip side of an operating rule or a step in
 the flow.
 
 - **Querying before resolving.** Guessing a name or ID instead of running `search_entities` first.

@@ -318,7 +318,7 @@ def test_create_reproducibility_record_writes_file(tmp_path, monkeypatch):
         {"step": 1, "tool": "get_drugs_mechanisms", "arguments": {"drug_identifiers": ["lapatinib"]}, "time": "t"})
     conf = mcpserver.create_reproducibility_record(question="what does lapatinib inhibit?",
                                                    findings="EGFR, ERBB2",
-                                                   skills="prokn-analysis v0.3.0")
+                                                   skills="prokn-search v0.3.0")
     assert isinstance(conf, str) and "Saved the reproducibility record" in conf
     files = list(tmp_path.glob("prokn-record-*.md"))
     assert files, "no record file written"
@@ -340,3 +340,38 @@ def test_create_reproducibility_record_literature_section(tmp_path, monkeypatch)
     text = list(tmp_path.glob("prokn-record-*.md"))[0].read_text()
     assert "## Literature (PubMed)" in text       # literature field becomes its own section
     assert "22178589" in text
+
+
+def test_record_includes_timestamps_and_durations(tmp_path, monkeypatch):
+    monkeypatch.setenv("PROKN_RECORD_DIR", str(tmp_path))
+    mcpserver.reset_query_log()
+    log = mcpserver._session_log()
+    log.append({"step": 1, "tool": "search_entities", "arguments": {"query": "EGFR"},
+                "time": "2026-09-30T10:12:03-04:00", "duration_ms": 142.0, "status": "ok"})
+    log.append({"step": 2, "tool": "get_subgraph", "arguments": {},
+                "time": "2026-09-30T10:12:05-04:00", "duration_ms": 3210.4, "status": "error"})
+    mcpserver.create_reproducibility_record(question="timing?")
+    text = list(tmp_path.glob("prokn-record-*.md"))[0].read_text()
+    assert "**Record generated:**" in text
+    assert "2026-09-30T10:12:03-04:00, 142 ms" in text
+    assert "3.21 s, error" in text                   # >1 s shown in seconds; failures flagged
+    assert "**Total tool run time:** 3.35 s (slowest: 3.21 s)" in text
+
+
+def test_query_log_middleware_times_calls():
+    import asyncio
+    from fastmcp import Client
+
+    async def run():
+        async with Client(mcpserver.mcp) as c:
+            await c.call_tool("reset_query_log", {})
+            await c.call_tool("get_queries", {"name_of_tool": "get_subgraph"})
+            return (await c.call_tool("get_query_log", {})).structured_content
+
+    out = asyncio.run(run())
+    rows = out.get("result", out) if isinstance(out, dict) else out
+    row = rows[-1]
+    assert row["tool"] == "get_queries"
+    assert row["status"] == "ok"
+    assert isinstance(row["duration_ms"], float) and row["duration_ms"] >= 0
+    assert "T" in row["time"] and ("+" in row["time"][10:] or "-" in row["time"][10:])  # has UTC offset

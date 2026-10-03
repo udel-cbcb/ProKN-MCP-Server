@@ -1,10 +1,10 @@
 ---
 name: prokn-explorer
-description: 'Turn a list of gene symbols (or other protein IDs) into a ProKN network and a shareable Explorer link. Builds a self-contained URL that carries the gene set (filter with gene_names); the Explorer computes the subnetwork on page load, so the link works on any instance. Non-gene IDs (UniProt accessions, RefSeq, ...) are mapped to gene symbols first. Triggers: "show / display / view these genes or proteins in ProKN", "visualize a gene or protein set as a network or graph", "network view of these genes", "make a network / subnetwork from this list", "map or show the relationships between these proteins as a network", "visualize how these genes are related in ProKN", "explore this set of genes or proteins in ProKN". Also accepts UniProt accessions, RefSeq, Ensembl and other IDs (mapped to gene symbols first). NOT for reading facts as text (a protein''s targets, kinases, pathways, evidence, or a single entity''s relationships). That belongs to the ProKN MCP data tools.'
+description: 'Turn a list of gene symbols or other protein IDs (UniProt, RefSeq, Ensembl and more, mapped to gene symbols first) into a ProKN network and a shareable Explorer link. The link carries the gene set itself, so it works on any ProKN instance. Use for "show / display / view these genes or proteins in ProKN", "visualize this gene or protein set as a network", "make a subnetwork from this list", "show how these proteins are related in ProKN", or "explore this set of genes in ProKN". NOT for reading facts as text, such as the targets, kinases, pathways or evidence for a protein (use prokn-search or the ProKN data tools).'
 compatibility: >-
-  Targets a running ProKN web instance. Requires network
-  access and Python 3 (standard library only). This skill renders a network;
-  to query ProKN data itself, use the ProKN MCP server tools.
+  Uses the get_explorer_network tool when the ProKN MCP server is connected; otherwise runs the
+  bundled script, which needs network access to a ProKN web instance and Python 3 (standard
+  library only). Renders a network; to query ProKN data, use prokn-search or the server tools.
 metadata:
   author: University of Delaware, Center for Bioinformatics and Computational Biology
   version: "0.3.0"
@@ -12,7 +12,7 @@ metadata:
   base_url: https://research.bioinformatics.udel.edu/ProKN/
   api_endpoint: /api/knowledge_graph
   explorer_page: /explorer
-  homepage: https://research.bioinformatics.udel.edu/ProKN/
+  companion_skills: ../prokn-search/SKILL.md, ../prokn-literature-review/SKILL.md
 ---
 
 # ProKN Explorer link builder
@@ -25,7 +25,7 @@ symbols and returns a ProKN Explorer URL the user can open to view the subnetwor
 those proteins.
 
 If the request is to *read* facts about the proteins (targets, kinases, pathways, neighbors),
-use the ProKN MCP server tools, NOT this skill.
+use `prokn-search` or the ProKN MCP server tools instead.
 
 There are two ways to run it. Both hit the same ProKN API and give the same link:
 
@@ -163,10 +163,22 @@ Make each result easy to reproduce. Don't just paste a bare URL. Report:
 Say plainly if the network came back empty (the Explorer shows "No results") instead of implying the
 link is broken.
 
+When the MCP tool path is used, also save a reproducibility record, as the other ProKN skills do:
+
+- If this step closes a `prokn-search` investigation, the `get_explorer_network` call is already in
+  that session's query log. It is included when `prokn-search` calls
+  `create_reproducibility_record` at the end, so don't reset the log here.
+- If this skill runs on its own, call `reset_query_log` first and `create_reproducibility_record` at
+  the end (with `skills="prokn-explorer v0.3.0"`). Give the user the saved file path, not the full
+  record.
+
+The fallback script doesn't go through the server, so nothing is logged. Report the items above in
+the reply instead.
+
 ## 8. References (read on demand)
 
 Extra info is in `references/` so this file stays short. Open the one you need:
 
-- **`references/id-types.md`**: the ID-type codes for `--from` / `from_type` (common set and full
+- `references/id-types.md`: the ID-type codes for `--from` / `from_type` (common set and full
   list), plus the any-species and best-effort mapping caveats.
-- **`references/pitfalls.md`**: the common failure modes and their fixes. Skim before finalizing.
+- `references/pitfalls.md`: the common failure modes and their fixes. Skim before finalizing.
