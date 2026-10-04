@@ -17,6 +17,11 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_BASE_URL = "https://research.bioinformatics.udel.edu/ProKN"
+
+# Node categories the ProKN API accepts in entity_types. Unknown names are passed through
+# with a warning, in case the API adds categories later.
+ENTITY_TYPES = ("GOTerm", "Complex", "Protein", "SubCellClass", "Site", "Domain",
+                "Pathway", "Variant", "Disease", "Isoform", "PTMSite")
 IDMAPPING_URL = "https://idmappingtest.uniprot.org/cgi-bin/idmapping_http_client3"
 
 
@@ -104,10 +109,33 @@ def map_ids_to_genes(ids, from_type, timeout=60):
     return genes, unmapped
 
 
-def explorer_url(gene_symbols, base_url):
+def normalize_entity_types(values):
+    """Split commas, drop blanks and repeats, fix the case of known types.
+
+    Returns (types, unknown); unknown names are kept as given.
+    """
+    canonical = {t.lower(): t for t in ENTITY_TYPES}
+    types, unknown = [], []
+    for v in values or []:
+        for part in str(v).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            name = canonical.get(part.lower(), part)
+            if name not in types:
+                types.append(name)
+                if name not in ENTITY_TYPES:
+                    unknown.append(name)
+    return types, unknown
+
+
+def explorer_url(gene_symbols, base_url, entity_types=None):
     # Self-contained link: the gene set travels in the URL and the Explorer builds the network on
     # page load. No POST and no per-process network_id cache, so the link works on any instance.
-    filter_param = urllib.parse.quote(json.dumps({"gene_names": gene_symbols}))
+    filt = {"gene_names": gene_symbols}
+    if entity_types:
+        filt["entity_types"] = list(entity_types)
+    filter_param = urllib.parse.quote(json.dumps(filt))
     return base_url.rstrip("/") + f"/explorer?filter={filter_param}"
 
 
@@ -132,6 +160,14 @@ def main(argv=None):
         default="GENENAME",
         help="ID type of the inputs as a UniProt mapping code. Default GENENAME, meaning the inputs are already gene symbols. "
              "Full list: " + IDMAPPING_URL + "?page=list",
+    )
+    parser.add_argument(
+        "--entity-types",
+        nargs="+",
+        default=None,
+        metavar="TYPE",
+        help="Only keep these node categories, e.g. --entity-types Pathway Complex. "
+             "Known types: " + ", ".join(ENTITY_TYPES),
     )
     parser.add_argument(
         "--base-url",
@@ -171,7 +207,11 @@ def main(argv=None):
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    url = explorer_url(genes, args.base_url)
+    types, unknown = normalize_entity_types(args.entity_types)
+    if unknown:
+        print(f"Warning: not a known ProKN entity type: {', '.join(unknown)} (sent anyway). "
+              f"Known types: {', '.join(ENTITY_TYPES)}", file=sys.stderr)
+    url = explorer_url(genes, args.base_url, types)
     print(url)
 
     if args.open_browser:

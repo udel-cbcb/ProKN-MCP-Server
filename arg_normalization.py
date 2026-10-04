@@ -124,13 +124,16 @@ TOOL_ARG_SPECS: dict[str, dict] = {
                     "name": "name_of_tool"},
     },
     "get_explorer_network": {
-        "valid": ["gene_names", "from_type"],
-        "primary": "gene_names", "lists": ["gene_names"],
+        "valid": ["gene_names", "from_type", "entity_types"],
+        "primary": "gene_names", "lists": ["gene_names", "entity_types"],
         "aliases": {"genes": "gene_names", "ids": "gene_names", "gene_list": "gene_names",
                     "gene_symbols": "gene_names", "symbols": "gene_names",
                     "proteins": "gene_names", "protein_list": "gene_names",
                     "from": "from_type", "id_type": "from_type", "source": "from_type",
-                    "source_type": "from_type"},
+                    "source_type": "from_type",
+                    "entity_type": "entity_types", "node_types": "entity_types",
+                    "node_type": "entity_types", "types": "entity_types",
+                    "categories": "entity_types", "node_categories": "entity_types"},
     },
 
 }

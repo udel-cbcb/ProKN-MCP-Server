@@ -1,6 +1,6 @@
 ---
 name: prokn-explorer
-description: 'Turn a list of gene symbols or other protein IDs (UniProt, RefSeq, Ensembl and more, mapped to gene symbols first) into a ProKN network and a shareable Explorer link. The link carries the gene set itself, so it works on any ProKN instance. Use for "show / display / view these genes or proteins in ProKN", "visualize this gene or protein set as a network", "make a subnetwork from this list", "show how these proteins are related in ProKN", or "explore this set of genes in ProKN". NOT for reading facts as text, such as the targets, kinases, pathways or evidence for a protein (use prokn-search or the ProKN data tools).'
+description: 'Turn a list of gene symbols or other protein IDs (UniProt, RefSeq, Ensembl and more, mapped to gene symbols first) into a ProKN network and a shareable Explorer link. The link carries the gene set itself, so it works on any ProKN instance, and the network can be limited to node types such as pathways or complexes. Use for "show / display / view these genes or proteins in ProKN", "visualize this gene or protein set as a network", "make a subnetwork from this list", "show how these proteins are related in ProKN", or "explore this set of genes in ProKN", "show only the pathways these genes share". NOT for reading facts as text, such as the targets, kinases, pathways or evidence for a protein (use prokn-search or the ProKN data tools).'
 compatibility: >-
   Uses the get_explorer_network tool when the ProKN MCP server is connected; otherwise runs the
   bundled script, which needs network access to a ProKN web instance and Python 3 (standard
@@ -60,7 +60,8 @@ The link is self-contained: the gene set travels in the URL and the Explorer bui
 page load.
 
 1. **Build the filter:** URL-encode `{"gene_names": ["PLK3", "HIPK3", ...]}` as the `filter` query
-   parameter, giving `{base_url}/explorer?filter=...`.
+   parameter, giving `{base_url}/explorer?filter=...`. To keep only some node categories, add
+   `"entity_types": ["Pathway", ...]` to the same object.
 2. **Open it:** the Explorer sends the genes to `{base_url}/api/knowledge_graph`, which drops
    duplicates and builds a subnetwork of the pathways, complexes, GO terms, and other entities the
    input proteins share, then renders it.
@@ -98,6 +99,18 @@ Mapping uses PIR's UniProt ID mapping service (a fixed lookup), and falls back t
 `from_type` codes are the same as the script's `--from` (see `references/id-types.md`);
 `GENENAME` is the default and means the inputs are already gene symbols.
 
+To show only certain kinds of node, pass `entity_types`. For example, to see just the pathways the
+proteins share:
+
+```
+get_explorer_network(gene_names=["CDK1", "CDK2", "CDK12", "MAPK8"], entity_types=["Pathway"])
+```
+
+The known types are `GOTerm`, `Complex`, `Protein`, `SubCellClass`, `Site`, `Domain`, `Pathway`,
+`Variant`, `Disease`, `Isoform` and `PTMSite`. Case doesn't matter. A name outside that list is
+still sent (the API may have added it), and the result includes a `warning` naming it. Leave
+`entity_types` out to include every category. The result echoes the types used in `entity_types`.
+
 ### Fallback path: the bundled script
 
 Use this only when there's no MCP server. The script does the same two steps and prints the link:
@@ -124,6 +137,12 @@ python scripts/prokn_explorer.py P00533 P04637 P42345 --from ACC
 `--from` defaults to `GENENAME` (inputs are already gene symbols, no mapping). The common codes and
 the full ~110-type list are in `references/id-types.md`.
 
+Add `--entity-types` to keep only some node categories, the same as the tool's `entity_types`:
+
+```bash
+python scripts/prokn_explorer.py CDK1 CDK2 CDK12 MAPK8 --entity-types Pathway
+```
+
 Either way: give the user the URL and say it opens the network in the ProKN Explorer. Don't open a
 browser for them unless they ask.
 
@@ -136,6 +155,9 @@ browser for them unless they ask.
 - **Case matters.** Symbols have to be canonical (`MAPK11`, not `mapk11`). Mapped symbols already
   come back canonical.
 - **Two or more symbols** (checked after any mapping).
+- **`entity_types` narrows the network.** With a narrow choice (one category), the proteins may
+  share nothing of that kind, and the Explorer shows "No results". Say so, and suggest dropping
+  the filter or adding categories.
 
 ## 6. Example
 

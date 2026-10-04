@@ -32,5 +32,11 @@ main workflow.
   `source<TAB>gene` lines. If the mapping output ever looks wrong, re-check that format against a
   live response.
 
+- **Filtering by node type.** `entity_types` keeps only the named categories (Pathway, Complex,
+  GOTerm, and so on). An unknown name is passed through with a warning rather than rejected, since
+  the API may add categories; check the spelling if the network comes back empty. Filtering by how
+  many input proteins a node connects to (the API's `common_across_at_least`) isn't supported here
+  yet, because the API doesn't apply it; tell the user if they ask for it.
+
 - **Render vs query.** This skill only renders a network. If the user actually wants the data
   (neighbors, paths, evidence), that's the ProKN MCP server tools, not this skill.

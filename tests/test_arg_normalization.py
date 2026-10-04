@@ -71,3 +71,11 @@ def test_normalize_call_normal_tool_keeps_name():
     name, out = normalize_call("search_entities", {"query": "EGFR"})
     assert name == "search_entities"
     assert out == {"term": "EGFR"}
+
+def test_explorer_entity_types_aliases_and_coercion():
+    out = normalize_args("get_explorer_network", {"genes": ["CDK1", "CDK2"], "node_types": "Pathway"})
+    assert out == {"gene_names": ["CDK1", "CDK2"], "entity_types": ["Pathway"]}
+    # an option the server doesn't support is dropped rather than failing validation
+    out = normalize_args("get_explorer_network",
+                         {"gene_names": ["CDK1", "CDK2"], "common_across_at_least": 3})
+    assert out == {"gene_names": ["CDK1", "CDK2"]}

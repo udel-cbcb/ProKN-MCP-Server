@@ -264,6 +264,42 @@ def test_get_explorer_network_symbols():
     assert "mapping" not in res  # GENENAME path adds no mapping block
 
 
+def test_get_explorer_network_entity_types():
+    # known types are case-fixed, split on commas, de-duplicated, and carried in the link filter
+    res = mcpserver.get_explorer_network(["CDK1", "CDK2"], entity_types=["pathway", "Complex,PATHWAY"])
+    assert res["entity_types"] == ["Pathway", "Complex"]
+    assert _filter_from_url(res["explorer_url"]) == {
+        "gene_names": ["CDK1", "CDK2"], "entity_types": ["Pathway", "Complex"]}
+    assert "warning" not in res
+
+
+def test_get_explorer_network_unknown_entity_type_passes_with_warning():
+    res = mcpserver.get_explorer_network(["CDK1", "CDK2"], entity_types=["Pathway", "Drug"])
+    assert _filter_from_url(res["explorer_url"])["entity_types"] == ["Pathway", "Drug"]
+    assert "Drug" in res["warning"]
+
+
+def test_get_explorer_network_no_entity_types_keeps_plain_filter():
+    for empty in (None, [], [""], " , "):
+        res = mcpserver.get_explorer_network(["CDK1", "CDK2"], entity_types=empty)
+        assert _filter_from_url(res["explorer_url"]) == {"gene_names": ["CDK1", "CDK2"]}
+        assert "entity_types" not in res
+
+
+def test_explorer_script_entity_types(capsys):
+    import importlib.util, pathlib
+    path = pathlib.Path(mcpserver.__file__).parent / "skills/prokn-explorer/scripts/prokn_explorer.py"
+    spec = importlib.util.spec_from_file_location("prokn_explorer_script", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.ENTITY_TYPES == mcpserver.EXPLORER_ENTITY_TYPES  # script and server agree
+    assert mod.main(["CDK1", "CDK2", "--entity-types", "pathway", "Drug"]) == 0
+    out = capsys.readouterr()
+    filt = _filter_from_url(out.out.strip())
+    assert filt == {"gene_names": ["CDK1", "CDK2"], "entity_types": ["Pathway", "Drug"]}
+    assert "Drug" in out.err
+
+
 @patch("mcpserver.urllib.request.urlopen")
 def test_get_explorer_network_from_acc(mock_open):
     # only network call is the PIR mapping; the link itself is self-contained (no POST)

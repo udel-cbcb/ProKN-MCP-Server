@@ -975,10 +975,40 @@ def _map_ids_via_graph(ids):
     return genes, unmapped
 
 
+# Node categories the ProKN knowledge_graph API accepts in `entity_types` (from the ProKN team).
+# The API may add more; unknown names are passed through with a warning rather than rejected.
+EXPLORER_ENTITY_TYPES = ("GOTerm", "Complex", "Protein", "SubCellClass", "Site", "Domain",
+                         "Pathway", "Variant", "Disease", "Isoform", "PTMSite")
+
+
+def _normalize_entity_types(values):
+    """Clean an entity_types list: split commas, drop blanks/repeats, fix case of known types.
+
+    Returns (types, unknown). Unknown names are kept as given so a category the API adds
+    later still works; the caller reports them.
+    """
+    canonical = {t.lower(): t for t in EXPLORER_ENTITY_TYPES}
+    if isinstance(values, str):
+        values = [values]
+    types, unknown = [], []
+    for v in values or []:
+        for part in str(v).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            name = canonical.get(part.lower(), part)
+            if name not in types:
+                types.append(name)
+                if name not in EXPLORER_ENTITY_TYPES:
+                    unknown.append(name)
+    return types, unknown
+
+
 @mcp.tool()
 def get_explorer_network(
     gene_names: Annotated[list[str], Field(description="Two or more gene symbols, e.g. ['PLK3','HIPK3','CDK1'], OR IDs of the type named by from_type; those get mapped to symbols first.")],
     from_type: Annotated[str, Field(description="UniProt ID-type code of the inputs, e.g. 'ACC', 'P_REFSEQ_AC', 'ENSEMBL_ID'. Default 'GENENAME' means the inputs are already gene symbols and no mapping happens.")] = "GENENAME",
+    entity_types: Annotated[list[str] | None, Field(description="Optional node categories to keep in the network, e.g. ['Pathway'] or ['Pathway','Complex']. Known types: GOTerm, Complex, Protein, SubCellClass, Site, Domain, Pathway, Variant, Disease, Isoform, PTMSite. Omit to include every category.")] = None,
 ) -> dict | str:
     """Build a ProKN network from gene symbols (or other IDs) and return a shareable Explorer link.
 
@@ -991,6 +1021,10 @@ def get_explorer_network(
     {explorer_url, gene_names, note} (plus mapping/unmapped when from_type is used), or a guidance
     message on failure. The link is self-contained (gene set in the URL; the Explorer builds the
     network on page load), so it works on any instance. See PROKN_WEB_BASE_URL for the target.
+
+    Pass entity_types to limit the network to certain node categories (e.g. only the pathways
+    the proteins share). Known types are matched case-insensitively; an unknown type is still
+    sent, and the result carries a warning naming it.
     """
     inputs = []
     for g in (gene_names or []):
@@ -1027,7 +1061,11 @@ def get_explorer_network(
     base = PROKN_WEB_BASE_URL.rstrip("/")
     # Self-contained link: the gene set travels in the URL and the Explorer computes the network
     # on page load
-    filt = urllib.parse.quote(json.dumps({"gene_names": genes}))
+    types, unknown_types = _normalize_entity_types(entity_types)
+    filt_obj = {"gene_names": genes}
+    if types:
+        filt_obj["entity_types"] = types
+    filt = urllib.parse.quote(json.dumps(filt_obj))
     result = {
         "explorer_url": f"{base}/explorer?filter={filt}",
         "gene_names": genes,
@@ -1035,6 +1073,11 @@ def get_explorer_network(
         "note": ("Open the link to view the network. If the Explorer shows 'No results', these "
                  "proteins share no pathway, complex, or GO term in ProKN."),
     }
+    if types:
+        result["entity_types"] = types
+    if unknown_types:
+        result["warning"] = (f"Not a known ProKN entity type: {', '.join(unknown_types)}. Sent anyway; "
+                             f"known types are {', '.join(EXPLORER_ENTITY_TYPES)}.")
     if from_type != "GENENAME":
         result["mapping"] = mapping
         result["unmapped"] = unmapped
