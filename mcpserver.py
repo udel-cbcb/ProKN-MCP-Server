@@ -101,7 +101,7 @@ def prokn_explorer_prompt() -> str:
     return _skill_prompt_body("prokn-explorer")
 
 
-@mcp.prompt(name="prokn-literature-review", description="Review the PubMed literature on a ProKN gene/protein/drug set or question, reconcile it with the graph's PMIDs, and optionally draw cited inferences (needs the PubMed MCP)")
+@mcp.prompt(name="prokn-literature-review", description="Draw confidence-graded inferences from ProKN graph evidence, then test each against PubMed for supporting and contradicting papers (needs the PubMed MCP)")
 def prokn_literature_review_prompt() -> str:
     """The prokn-literature-review skill as a selectable prompt."""
     return _skill_prompt_body("prokn-literature-review")

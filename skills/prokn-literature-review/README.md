@@ -1,15 +1,16 @@
 # prokn-literature-review
 
-An Agent Skill that teaches a model to do the literature step of the ProKN pipeline: take a
-gene/protein/drug/disease set (often from `prokn-search`) or a biological question, search PubMed
-through the PubMed MCP, write an evidence-backed review that cites papers by PMID and reconciles them
-with the PMIDs ProKN already carries on its edges, and optionally draw cited, confidence-graded
-inferences (calibration, mechanism, ABC bridging hypotheses) on top of that evidence.
+An Agent Skill that teaches a model to draw inferences from the ProKN graph and then test them
+against the literature. It pulls the ProKN edges that bear on a gene/protein/drug/disease set
+(often from `prokn-search`), states confidence-graded inferences from those edges (edge strength,
+mechanisms, A-B-C bridges, shared context, gaps), and then searches PubMed through the PubMed MCP
+for papers that support or contradict each one. The result is a verdict table (supported, mixed,
+contradicted, or no literature found) with a short summary.
 
-It has no tool of its own; it describes how to use the connected PubMed and ProKN tools. The graph
-tells you *that* things connect; the literature tells you *how strong* that is. See `SKILL.md` for
-the pipeline and operating rules. Pairs with `prokn-search` (entity set + graph evidence) and
-`prokn-explorer` (network view).
+Inferences are written down before any PubMed search, so the papers test them instead of shaping
+them. It has no tool of its own; it describes how to use the connected ProKN and PubMed tools. See
+`SKILL.md` for the pipeline and operating rules. Pairs with `prokn-search` (entity set + graph
+evidence) and `prokn-explorer` (network view).
 
 ```
 skills/
@@ -20,20 +21,21 @@ skills/
     ├── build.sh                   # rebuilds the bundle into ../ (the skills/ dir)
     └── references/                # extra detail, loaded on demand
         ├── pubmed-tools.md        # which PubMed tool answers which need + query building
-        ├── synthesis.md           # turning hits into a cited, tiered review; graph reconciliation
-        ├── inference.md           # ABC / literature-based discovery, confidence rubric, patterns
+        ├── inference.md           # inference patterns from graph edges, prior confidence
+        ├── verification.md        # PubMed checks, verdicts, final confidence, table
         └── pitfalls.md            # recurring mistakes and fixes
 ```
 
-Status: early (v0.2.2). Core pipeline, reconciliation, and an optional inference layer (confidence
-calibration, mechanism, ABC bridging hypotheses, output as a table) are in place; expect it to grow.
+Status: early (v0.3.0). Version 0.3.0 reverses the order of earlier versions: inferences now come
+from the graph first and PubMed is used to test them, instead of reviewing the literature first and
+inferring from it.
 
 ## Requirements
 
-The **PubMed MCP** must be connected in your client for the literature search. For the full pipeline
-(graph set + evidence reconciliation), the **ProKN MCP server** and the `prokn-search` skill
-should also be available. This skill has no script of its own; it drives the connected servers'
-tools.
+Both the **ProKN MCP server** (for the graph evidence the inferences come from) and the **PubMed
+MCP** (for the literature check) must be connected in your client. The `prokn-search` skill is
+useful for gathering the graph evidence. This skill has no script of its own; it drives the
+connected servers' tools.
 
 ## Packaging it as a .skill bundle
 
@@ -64,8 +66,8 @@ prompt:
 
 - `skill://prokn-literature-review/SKILL.md`: the skill definition
 - `skill://prokn-literature-review/_manifest`: file listing (path, size, sha256)
-- `skill://prokn-literature-review/<path>`: supporting files, e.g. `references/pubmed-tools.md`
-  or `references/inference.md`
+- `skill://prokn-literature-review/<path>`: supporting files, e.g. `references/inference.md`
+  or `references/verification.md`
 
 The PubMed search itself still needs the PubMed MCP connected in the client; the ProKN server does
 not proxy it.
@@ -81,6 +83,6 @@ not proxy it.
 
 ## Note
 
-The committed `prokn-literature-review.skill` (in the parent `skills/` folder) is built from the source in
-this folder (`SKILL.md`, `references/`), so run `./build.sh` and re-commit the new `.skill` whenever
-you change those.
+The committed `prokn-literature-review.skill` (in the parent `skills/` folder) is built from the
+source in this folder (`SKILL.md`, `references/`), so run `./build.sh` and re-commit the new
+`.skill` whenever you change those.

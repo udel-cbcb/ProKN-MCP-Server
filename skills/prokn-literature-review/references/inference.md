@@ -1,97 +1,74 @@
-# Inference from the evidence
+# Inferring from the graph
 
-How to draw conclusions on top of the retrieved papers without turning synthesis into fiction.
-Every inference here is grounded in PMIDs, labeled as an inference, and graded for confidence. If you
-can't do all three, don't make the inference.
+How to turn ProKN edges into inferences before any literature search. Every inference here rests on
+named graph edges, is written as one testable sentence, and gets a prior confidence from the graph
+evidence alone. If you can't do all three, don't make the inference.
 
-## The four kinds, and how to do each
+## The kinds, with the graph patterns behind them
 
-### 1. Confidence calibration
+### 1. Edge strength
 
-Take a connection (a ProKN edge, or a claim) and say how well the evidence actually backs it, rather
-than just that a paper exists.
+Take one connection and say how well its own provenance backs it.
 
-- Count the independent primary studies (different groups, not one lab citing itself).
-- Weigh the tier (below). One preprint is not three primary papers.
-- Fold in the graph side: a ChEMBL/DrugCentral-only edge with strong primary literature moves up; a
-  LINCS-only signal with no paper stays low.
-- Output: a graded call plus what would raise it. "High confidence: EGFR is a lapatinib target
-  (PMIDs a, b, c; primary). Would rise further with a co-crystal structure."
+- Pattern: a single edge (drug-target, kinase-site, protein-pathway) and its `evidence` object.
+- Prior: curated PMID > database assertion (source database only) > measurement or tox signal
+  (LINCS `log2Ratio`, a ChEMBL tox-screen link).
+- Example: "Lapatinib inhibits ERBB2 (DrugCentral edge with an IC50 value)."
 
-### 2. Mechanistic inference
+### 2. Mechanism
 
-When several papers together imply *why* a connection holds (a pathway, a binding mode, a regulatory
-step) that no single edge or abstract states outright, say it as an inference and cite the papers
-that each contribute a piece.
+A path suggests how one entity affects another.
 
-### 3. Bridging hypotheses (Swanson ABC / literature-based discovery)
+- Pattern: a chain of edges, e.g. drug -> target kinase -> site -> protein -> pathway, from
+  `get_drugs_mechanisms`, `get_phosphosites_catalyzed_by_proteins`,
+  `get_pathways_between_protein_sets` or `get_subgraph`.
+- Prior: no higher than the weakest edge in the chain, and one step lower for each step that is
+  only a measurement.
+- Example: "Drug X may reduce phosphorylation of protein P, since it inhibits kinase K, which
+  catalyzes a site on P."
 
-The classic move: the literature supports A-B and, separately, B-C, but nobody has connected A-C.
-Propose A-C as a testable hypothesis.
+### 3. Bridge (A-B-C)
 
-- Show both halves: the A-B PMIDs and the B-C PMIDs, and the shared B.
-- State it as a hypothesis and give the confidence (usually moderate at best) and how to test it.
-- Never assert A-C as established, and never claim it's "in ProKN" if it isn't.
-- Watch for a spurious B: if B means two different things in the two literatures (same word, different
-  entity), the bridge is invalid. Check the B is the same node.
+The graph has A-B and B-C but no direct A-C.
 
-### 4. Gap and contradiction inference
+- Pattern: two edges sharing a node, with no edge between the ends (check with
+  `get_relationship_given_entity` or `get_protein_interactions`).
+- Prior: speculative or low.
+- Check that B is the same node in both edges: same node ID, not just the same label. A symbol that
+  maps to two genes, or a drug class standing in for one drug, makes the bridge invalid.
 
-- **Gap:** the literature supports a connection ProKN lacks. Infer it as a candidate edge to add,
-  labeled as literature-only.
-- **Contradiction:** papers disagree, or newer work fails to replicate. Weigh them (recency, tier,
-  sample size, independence) into a current-consensus call and say how firm it is.
+### 4. Shared context
 
-## Confidence rubric
+Input proteins share pathways, complexes, or GO terms.
 
-Grade every inference:
+- Pattern: the shared nodes from `get_pathways_between_protein_sets` or a subgraph of the set.
+- Prior: moderate when several specific pathways or a complex are shared; low when the only shared
+  nodes are broad GO terms.
+- Example: "CDK1 and CDK2 act together in G2/M regulation (both participate in three Reactome
+  cell-cycle pathways)."
 
-- **High:** multiple independent primary studies agree; mechanism or measurement is direct; no
-  serious contradiction.
-- **Moderate:** one solid primary study plus supporting reviews, or consistent but indirect
-  evidence; some gaps.
-- **Low:** single study, single species/cell line, indirect or correlational only, or a
-  computational prediction.
-- **Speculative:** a bridging hypothesis or a mechanistic guess with partial support. Always phrased
-  as "to be tested".
+### 5. Gap
 
-Say, in one clause, what evidence would move the grade up. A grade with no path to improve it isn't
-useful.
+A connection you'd expect from the rest of the graph is missing.
 
-## Evidence tiers (same as the review)
+- Pattern: most members of a set share an edge that one member lacks, or a kinase's close family
+  members all reach a site it doesn't.
+- Prior: speculative. A missing edge often means missing curation, not missing biology.
 
-Primary experimental study > review or meta-analysis > preprint or computational prediction. ProKN edge
-PMIDs are usually curated primary; a LINCS perturbation signal or a docking prediction is weaker and
-an inference built only on those cannot be more than Low.
+## Prior-confidence rubric (graph only)
 
-## Anchoring (the anti-hallucination rule)
+- **High:** a direct edge with a curated PMID, or several independent curated edges agreeing.
+- **Moderate:** a database assertion, or a short path of curated edges.
+- **Low:** rests on a measurement or tox signal, or on a longer path.
+- **Speculative:** a bridge or a gap.
 
-- Base each inference on what the **abstract (or full text) actually says**, not the title, not the
-  journal, not the paper's existence. Where you can, point to the specific claim.
-- If the abstract doesn't support a step in the chain, the step is dropped and the inference weakens
-  or falls.
-- Don't infer across a term the papers use loosely (a gene symbol that maps to two genes, a drug
-  class vs a specific drug). Resolve the entity first.
+Write the prior down with the inference. The literature check can raise or lower it later
+(`verification.md`), but the prior records what the graph alone supports.
 
-## Output shape
+## Writing the inference
 
-Present the inferences as a Markdown table, after the review, one row per inference:
-
-| # | Inference | Kind | Confidence | Basis (PMIDs) | To raise confidence / test |
-|---|-----------|------|------------|---------------|----------------------------|
-| 1 | EGFR is a bona fide lapatinib target | calibration | High | 22178589, 38986734 (primary) | co-crystal or independent replication |
-| 2 | Lapatinib may modulate C via B | bridge (A-B-C) | Speculative | A-B: 12345678; B-C: 23456789 | direct A-C assay |
-
-Column meanings:
-
-- **Kind:** calibration / mechanism / bridge / gap / contradiction.
-- **Confidence:** high / moderate / low / speculative.
-- **Basis:** the PMIDs the inference rests on, tier noted; for a bridge, give both halves of the
-  chain (A-B and B-C PMIDs) in this cell so the reasoning is visible.
-- **To raise confidence / test:** the one thing that would move the grade up, or how to test a
-  hypothesis.
-
-Keep the table separate from the cited review above it, so a reader can take the facts and leave the
-hypotheses (or vice versa). If there's nothing worth inferring, say so in one line instead of an
-empty table. (DOIs still go with the citations in the review itself, per PubMed's attribution rule;
-the table carries PMIDs.)
+- One sentence, testable, in plain terms: who does what to whom.
+- Name the edges it rests on, with their provenance, in the ProKN basis column.
+- Say "may" or "suggests" for anything below high; never state a bridge or gap as fact.
+- Prefer the few inferences the question needs over a long list. Each one costs at least two
+  PubMed searches.

@@ -1,223 +1,196 @@
 ---
 name: prokn-literature-review
-description: 'Literature review and inference for ProKN results: take a gene, protein, drug or disease set (often from prokn-search) or a biological question, search PubMed through the PubMed MCP, write a PMID-cited review reconciled with the PMIDs already in ProKN, and optionally draw confidence-graded inferences from the papers. Use for "literature review of these genes", "what does the literature say about X", "find papers supporting this connection", "back these ProKN findings with references", "hypothesize a connection from the papers", or a request that works something out in ProKN and THEN reviews the literature on it. NOT for rendering a network (prokn-explorer) or reading graph facts alone (prokn-search).'
+description: 'Draw inferences from ProKN graph evidence, then test each one against PubMed: pull the relevant edges for a gene, protein, drug or disease set (often from prokn-search), state cited, confidence-graded inferences (mechanisms, bridging hypotheses, edge strength), and search PubMed for papers that support or contradict each, ending in a verdict table. Use for "what can we infer from ProKN about X, and does the literature back it", "hypothesize a connection and check the papers", "back these ProKN findings with references", "is this inferred link reported in the literature", or a request that works something out in ProKN and THEN checks it against the literature. NOT for rendering a network (prokn-explorer) or reading graph facts alone (prokn-search).'
 compatibility: >-
-  Needs the PubMed MCP connected for the literature search, and pairs with prokn-search and the
-  ProKN MCP server for the entity set and graph evidence. Read-only.
+  Needs the ProKN MCP server for the graph evidence and the PubMed MCP for the literature check.
+  Pairs with prokn-search, which can supply the entity set and edges. Read-only.
 metadata:
   author: University of Delaware, Center for Bioinformatics and Computational Biology
-  version: "0.2.2"
+  version: "0.3.0"
   repository: https://research.bioinformatics.udel.edu/ProKN/
   companion_skills: ../prokn-search/SKILL.md, ../prokn-explorer/SKILL.md
 ---
 
 # ProKN literature review
 
-The literature step of the ProKN pipeline. Take a set of entities (genes, proteins, drugs,
-diseases, sites) or a biological question, search PubMed, and write a short evidence-backed review
-that says what the literature actually supports, cites it by PMID, and lines it up against the
-evidence ProKN already stores on its edges.
+Start from what the ProKN graph shows, reason from it to inferences, and then use PubMed to test
+those inferences. The graph supplies the connections and their provenance; the inferences say what
+those connections imply; the literature check says whether published work supports, disputes, or
+is silent on each implication.
 
-The point is the pairing: the graph tells you *that* two things are connected and gives a curated
-PMID or a source database; the literature tells you *how strong* that is, whether it still holds,
-and what the graph is missing. This skill does the second half.
+The order matters. Inferences are written down from the graph evidence before any PubMed search,
+so the papers test them instead of shaping them.
 
 ## 1. What this is and when to use it
 
-Use it when the user wants the literature behind a result: papers supporting a connection, a review
-of what's known about a gene or drug, or a check on whether a ProKN edge is backed by more than one
-report. It is the natural closing step after `prokn-search` produces a gene/entity set.
+Use it when the user wants conclusions drawn from ProKN and checked against the literature: what a
+set of kinase-site edges implies about a drug, whether a path between two proteins suggests a
+mechanism, whether a ProKN edge holds up, or which hypotheses from the graph are worth testing.
 
-Do not use it to render a network (that's `prokn-explorer`) or to read graph facts on their own
-(that's the ProKN data tools). If the user only wants raw graph relationships, stay in
-`prokn-search`.
+Do not use it to render a network (that's `prokn-explorer`) or to report graph facts without
+drawing conclusions (that's `prokn-search`). If the user only wants papers on a topic with no ProKN
+step, say that this skill reasons from the graph first, and offer to pull the graph evidence.
 
-## 2. The pipeline (who does what)
+## 2. The pipeline
 
-1. `prokn-search` resolves the question into real entities, pulls the relationships, and hands
-   over a gene/entity set plus the graph's own evidence (PMIDs and source databases on each edge).
-2. This skill turns that set into targeted PubMed searches, retrieves and reads the relevant
-   papers, and writes the review.
-3. Reconciliation is the ProKN-specific part: compare what the literature says to the PMIDs the
-   graph already carries (section 6), so the user sees agreement, new support, and gaps.
-
-If the user comes straight here with a plain question and no prior ProKN search, resolve the
-entities first (a quick `search_entities` in ProKN, or accept the user's terms) before searching PubMed.
+1. **Graph evidence.** Resolve the entities and pull the edges that bear on the question, with
+   their provenance (section 4). `prokn-search` can do this and hand over the set.
+2. **Inferences.** From the graph evidence alone, state what it implies, each inference tied to
+   the edges it rests on and given a prior confidence (section 5).
+3. **Literature check.** For each inference, search PubMed for supporting and contradicting work,
+   read the abstracts, and give a verdict and a final confidence (sections 6 and 7).
+4. **Output.** A verdict table and a short summary (section 8), then the reproducibility record
+   (section 9).
 
 ## 3. Operating rules
 
-- **Search on real entities, not loose words.** Turn the set into specific query terms: gene
-  symbols and their aliases, drug names, disease terms.
-- **Cite every claim with PMIDs.** Each statement in the review points to the article(s) it came
-  from. Leave out anything you can't cite.
-- **Reconcile with the graph.** For a connection ProKN already reports, say whether the literature
-  agrees, adds new support, or conflicts (section 6). Don't present the graph edge and the papers as
-  if they were unrelated.
-- **Read at least the abstract before citing.** Cite from what the article says, not from its title.
-  Use full text only when the tool provides it and copyright allows (section 7).
+- **Infer from the graph first.** Write every inference, with its ProKN basis and prior
+  confidence, before the first PubMed search. Don't reshape an inference to fit the papers
+  afterwards. If the papers suggest something new, list it separately as a literature lead.
+- **Ground every inference in edges.** Each one names the ProKN edges it comes from and their
+  provenance (PMID, or source database such as `SAB` / `dcc`). Without a graph basis, it isn't an
+  inference for this skill.
+- **Search both directions.** For each inference, look for papers that dispute it as well as
+  papers that support it (section 6). Looking only for support makes every inference look good.
+- **Don't count the inference's own source as support.** A PMID already on an edge the inference
+  was built from is part of the graph basis, not independent confirmation.
+- **Read at least the abstract before citing.** Cite from what the article says, not its title.
+  Use full text only when the tool provides it and copyright allows.
 - **Rank the evidence.** Primary experimental study > review or meta-analysis > preprint or
-  computational prediction. Say which tier a claim rests on; don't state a single mouse study as
-  settled fact.
-- **Declare what you skipped.** If you only searched one branch (one gene, one direction, English
-  only, a date cutoff), say so in one line. Otherwise the reader will assume you covered everything.
-- **Report gaps.** If the search returns little or nothing, say so instead of
-  padding the review or implying the connection is proven.
+  computational prediction. A single mouse study or preprint doesn't settle anything.
+- **Keep every inference in the output.** Contradicted inferences and those with no literature
+  stay in the table with their verdicts; don't drop the ones that didn't hold up.
+- **No literature is not a refutation.** If nothing addresses an inference, the verdict is "No
+  literature found" and it stays a hypothesis.
+- **Declare what you skipped.** Name any entity, branch, direction, or date range you didn't
+  check, in one line.
 - **Never invent a PMID or a finding.** No fabricated identifiers, no merging several papers into
   one citation, no claims the papers don't make.
-- **Label inferences.** Anything you conclude beyond what a paper states is an
-  inference: mark it as one, ground it in the PMIDs it rests on, and grade its confidence
-  (section 8). Never present an inference as established fact.
 - **Read-only.** Searching and reading only. No writes anywhere.
 
-## 4. The PubMed tools
+## 4. Step 1: gather the graph evidence
 
-Point at the PubMed MCP's own tools; don't re-document their parameters here. By concern:
+Resolve the entities with `search_entities`, then pull the edges the question needs (drug targets,
+kinase-site edges, paths between proteins, shared pathways or complexes). If `prokn-search` already
+ran, reuse its entities and edges instead of querying again. Keep, for each edge:
 
-- Find papers: `search_articles` (the main entry), `find_related_articles` (expand from a good hit).
-- Read a paper: `get_article_metadata` (title, abstract, journal, year, authors), `get_full_text_article` (when available).
-- Identifiers: `lookup_article_by_citation`, `convert_article_ids` (PMID / PMCID / DOI).
-- Rights: `get_copyright_status` before quoting or pulling full text.
+- the two entities and the relationship,
+- its provenance: PMIDs if present, otherwise the source database, plus any measurement value
+  (LINCS `log2Ratio`, DrugCentral IC50).
 
-A map of which tool answers which need, and how to build good queries, is in
-`references/pubmed-tools.md`.
+Call `reset_query_log` before the first ProKN call so the record covers only this run.
 
-## 5. Workflow
+## 5. Step 2: infer from the graph
 
-Run only the steps the question needs.
+State what the edges imply. The common kinds:
 
-1. **Frame.** Identify the entities and the exact claim(s) the user wants backed. If it came from a
-   `prokn-search` run, carry over the entity set and the edge PMIDs.
-2. **Build queries.** One targeted `search_articles` per claim or entity pair, using symbols plus
-   aliases and specific terms. Widen or narrow based on what comes back (`references/pubmed-tools.md`).
-3. **Retrieve and read.** Pull `get_article_metadata` for the top hits; read abstracts; use
-   `find_related_articles` to round out a thin result and `get_full_text_article` where it's allowed
-   and needed.
-4. **Reconcile.** Line the papers up against the graph's PMIDs and source databases (section 6).
-5. **Synthesize.** Write the review grouped by claim or entity, each point cited, each tier labeled
-   (`references/synthesis.md`).
-6. **Infer (optional).** If the user wants more than a summary, draw cited, confidence-graded
-   inferences on top of the evidence (section 8): calibrate confidence, propose a mechanism, or
-   offer a bridging hypothesis. Skip it for a plain "what do the papers say".
-7. **Report and record.** Give the review (and any inferences) with citations, then record the run
-   (section 9), listing the exact queries and the PMIDs used so someone else can rerun it.
+- **Edge strength.** How well a single connection is backed by its own provenance. A curated PMID
+  is stronger than a database assertion, which is stronger than a measurement or tox signal.
+- **Mechanism.** A path in the graph suggests how one entity affects another (a drug inhibits a
+  kinase that phosphorylates a site on a protein in a pathway).
+- **Bridge (A-B-C).** The graph has A-B and B-C but no A-C, which suggests A may relate to C
+  through B. Check that B is the same node in both edges.
+- **Shared context.** Input proteins share pathways, complexes, or GO terms, which suggests a
+  functional link between them.
+- **Gap.** A connection you'd expect from the rest of the graph is missing.
 
-## 6. Reconciling graph evidence with the literature
+For each inference, write one testable sentence, its kind, the edges it rests on (with
+provenance), and a prior confidence from the graph alone: high, moderate, low, or speculative.
+Bridges and gaps start at speculative or low. Patterns, the prior-confidence rubric, and the
+spurious-bridge check are in `references/inference.md`.
 
-ProKN edges already carry provenance: a curated PMID, or a source database (`SAB` / `dcc`), plus
-measurement values on quantitative edges. Put that next to the literature and sort each connection
-into one of:
+## 6. Step 3: check each inference in PubMed
 
-- **Graph and literature agree.** The edge's PMID (or a new paper) supports it. Strongest case; say
-  so and cite both.
-- **Graph-only.** ProKN has the edge with a PMID, but your PubMed search didn't surface it. Still
-  valid evidence; note that it rests on the curated edge and the search didn't independently expand
-  it.
-- **Literature-only.** Papers support a connection the graph doesn't have. Flag it as new or
-  extending, not as already in ProKN.
-- **Conflicting.** The literature disputes or fails to replicate what the edge asserts. Report the
-  conflict with both citations; don't quietly drop either side.
+For each inference, in order:
 
-Keep the graph's PMIDs and the search's PMIDs distinguishable in the write-up so the reader can tell
-curated evidence from what you found.
+1. **Support query.** Pair the key entities with the mechanism word, using symbols and aliases,
+   e.g. `alpelisib AND AKT1 AND phosphorylation`.
+2. **Counter query.** Look for work that disputes it, e.g. the same pair with terms like
+   resistance, reactivation, no effect, or not required. Also read the support results for
+   findings that go the other way.
+3. **Read and sort.** Pull abstracts with `get_article_metadata`. For each relevant paper, note
+   whether it supports, contradicts, or only partly addresses the inference, and its tier.
+4. **Check the edge's own PMIDs.** Confirm they say what the edge claims, but keep them in the
+   graph basis, not in the support column.
 
-## 7. Evidence, citations, and full text
+Query building, the counter-evidence patterns, and the reading order are in
+`references/pubmed-tools.md`. The full verification method is in `references/verification.md`.
 
-- Label the tier of each claim: primary experimental study > review or meta-analysis > preprint or
-  computational prediction. ProKN edge PMIDs are usually curated primary evidence; treat a
-  perturbation signal or a prediction as weaker.
-- Prefer abstracts for synthesis. Pull full text only when `get_full_text_article` provides it and
-  `get_copyright_status` allows; quote sparingly and attribute.
-- Report PMIDs (and DOIs when handy). Don't merge separate papers into one citation, and don't
-  invent identifiers.
-- When the literature is thin, say so in a sentence rather than padding the review.
+## 7. Verdicts and confidence
 
-## 8. Inference (optional): hypotheses from the evidence
+Give each inference one verdict:
 
-Retrieval and reconciliation say what the papers report. This step draws conclusions *on top of*
-that evidence. It is optional: use it when the user wants
-more than a summary (a confidence call, a mechanism, a new hypothesis). Everything here is grounded
-in PMIDs, labeled as inference, and confidence-graded. Full method in `references/inference.md`.
+- **Supported:** at least one primary study directly supports it, and nothing serious disputes it.
+- **Mixed:** both supporting and contradicting primary evidence.
+- **Contradicted:** primary evidence disputes it, and nothing comparable supports it.
+- **No literature found:** nothing addresses it. It stays a hypothesis.
 
-Kinds of inference, weakest to strongest in what they add:
+Then set a final confidence (high, moderate, low, speculative) from the prior and the verdict. A
+supported inference with independent primary studies can rise; a contradicted one falls; one with
+no literature keeps its prior. Say in one clause what would change the grade. The rubric for
+combining them is in `references/verification.md`.
 
-- **Confidence calibration.** Judge how well-established a connection is from the evidence behind it:
-  how many studies, how independent, what tier. "One preprint" and "three independent primary
-  studies" are different claims. This is the natural upgrade to reconciliation: a ChEMBL-only edge
-  with strong primary literature becomes high-confidence; a LINCS-only signal with no paper stays
-  low.
-- **Mechanistic inference.** From several papers, infer *why* a connection holds (the pathway or
-  binding mode) when no single edge or paper states it outright. Synthesis across sources, cited.
-- **Bridging hypotheses (ABC / literature-based discovery).** When the evidence has A-B and B-C but
-  no A-C, propose A-C as a *testable hypothesis*, showing both halves of the chain. This can surface
-  links ProKN doesn't have. Present it as a hypothesis to test.
-- **Gap and contradiction inference.** Infer where the graph is missing something the literature
-  supports, or weigh conflicting papers into a current-consensus call and say how firm it is.
+## 8. Output
 
-Rules for every inference:
+A Markdown table, one row per inference, then a short summary.
 
-- **Label every inference as an inference.** Keep "the graph says", "the papers show" and "this
-  suggests" clearly apart. Mark each one (e.g. start it with "Inference:").
-- **Show the evidence chain.** Every inference names the PMIDs it rests on; a bridging hypothesis
-  shows the A-B and B-C citations. Without a cited chain, don't make the inference.
-- **Grade the confidence** (high / moderate / low / speculative) from tier and independence, and say
-  what would raise it. Single-study, single-species, or preprint-only stays low.
-- **Anchor to what the abstracts say**, not to titles or a paper's mere existence. If the abstract
-  doesn't support the step, drop it.
-- **Hypotheses stay hypotheses.** Bridging and gap inferences are testable proposals, phrased as
-  such, never presented as established or as already in ProKN.
-- **Thin evidence yields no inference.** "Insufficient evidence to infer" is a valid, preferred
-  output over a confident guess.
+| # | Inference | Kind | ProKN basis | Supporting PMIDs | Contradicting PMIDs | Verdict | Confidence | To test or strengthen |
+|---|-----------|------|-------------|------------------|---------------------|---------|------------|-----------------------|
 
-Present the inferences as a **table** (one row each: inference, kind, confidence, basis PMIDs, and
-what would raise confidence or test it), kept separate from the cited review above it. The ABC model,
-the confidence rubric, the table columns, and worked patterns are in `references/inference.md`.
+- **ProKN basis:** the edges, with their PMIDs or source database.
+- **Supporting / Contradicting PMIDs:** papers from the search, with the tier noted (primary,
+  review, preprint). Leave a cell as "none found" rather than blank.
+
+The summary is three to five sentences: which inferences held up, which were contradicted, which
+remain untested hypotheses, and anything the search couldn't cover. Literature leads (ideas the
+papers raised that weren't among the inferences) go in one line after the summary, marked as
+untested.
 
 ## 9. Reproducibility
 
-PubMed calls run on a different MCP server than ProKN, so they are not in ProKN's query log. The
-record tool has a `literature` field for exactly this:
+PubMed calls run on a different MCP server, so they are not in ProKN's query log. At the end, call
+`create_reproducibility_record` with:
 
-- Keep the ProKN reproducibility record for the graph half: call `reset_query_log` before the
-  investigation and `create_reproducibility_record` at the end. Pass the exact PubMed queries you
-  ran and the PMIDs you cited in the `literature` argument (it becomes a "Literature (PubMed)"
-  section in the record); the graph findings go in `findings` as usual.
-- If there was no ProKN step (a plain literature question), still list the queries and the returned
-  PMIDs in the reply so the review can be rerun.
+- `findings`: the inferences, each with its ProKN basis, verdict, and final confidence.
+- `literature`: for each inference, the exact support and counter queries you ran and the PMIDs
+  you cited.
+- `skills`: e.g. `"prokn-search v0.3.0, prokn-literature-review v0.3.0"`.
 
-Always include the queries and PMIDs: they are what let someone else rerun the review.
+Give the user the saved file path plus a one- or two-line summary.
 
 ## 10. Worked example
 
-"Which kinases downregulated by alpelisib have literature support, and how does it line up with
-ProKN?"
+"What does ProKN suggest about how alpelisib affects kinase signaling, and does the literature back
+it?"
 
-1. `prokn-search` resolves alpelisib, pulls the LINCS-downregulated sites and their kinases, and
-   hands over the kinase set with the edge evidence.
-2. For each kinase, `search_articles("alpelisib AND <kinase> AND phosphorylation")` (plus aliases);
-   read the top abstracts with `get_article_metadata`.
-3. Reconcile: kinases whose edges carry a curated PMID that the search corroborates (agree),
-   LINCS-only signals with no paper yet (graph-only / weak tier), and any kinase with papers but no
-   ProKN edge (literature-only).
-4. Write the review grouped by kinase, each point cited and tiered, noting sites with no literature.
-5. (Optional) Inference: calibrate confidence per kinase (strong primary support vs LINCS-only), and
-   if the papers give A-B and B-C without A-C, offer one bridging hypothesis, labeled and cited
-   (section 8). Lay the inferences out in a table.
-6. `create_reproducibility_record(question=..., findings=<graph findings>, literature=<the PubMed
-   queries and cited PMIDs>, skills="prokn-search v0.3.0, prokn-literature-review v0.2.2")`;
-   give the user the saved path plus a short summary.
+1. `reset_query_log()`, then `search_entities("alpelisib")` and
+   `get_phosphosites_regulated_by_perturbagen(perturbagen="alpelisib", direction="down")` for the
+   LINCS P100 sites it lowers, then `get_proteins_catalyzing_sites` for their kinases.
+2. Inferences from the graph, before any search. For example: "Alpelisib reduces signaling through
+   kinase K, since it lowers several sites K catalyzes" (mechanism; basis: the LINCS edges and the
+   kinase-site edges with their PMIDs; prior: low, because LINCS edges are measurements). Write one
+   such row per kinase worth testing.
+3. For each inference, run the support query (`alpelisib AND <kinase> AND phosphorylation`) and a
+   counter query (`alpelisib AND <kinase> AND (resistance OR reactivation)`), and read the
+   abstracts.
+4. Fill in the verdicts and final confidence, keeping contradicted and untested rows in the table.
+5. `create_reproducibility_record(question=..., findings=<inferences and verdicts>,
+   literature=<queries per inference and cited PMIDs>,
+   skills="prokn-search v0.3.0, prokn-literature-review v0.3.0")`; give the user the saved path.
 
 ## 11. References (read on demand)
 
-- `references/pubmed-tools.md`: which PubMed tool answers which need, and how to build queries.
-- `references/synthesis.md`: turning hits into a cited, tiered review, and grouping by claim.
-- `references/inference.md`: the ABC / literature-based-discovery model, the confidence rubric,
-  and worked inference patterns. Read before drawing any inference.
-- `references/pitfalls.md`: recurring mistakes (bad queries, title-only citing, ignoring the
-  graph's PMIDs, over-claiming inferences). Skim before finalizing.
+- `references/inference.md`: inference patterns from graph edges, the prior-confidence rubric, and
+  the spurious-bridge check. Read before step 2.
+- `references/verification.md`: testing an inference in PubMed, the circularity rule, verdicts,
+  combining prior and verdict into final confidence, and the output table.
+- `references/pubmed-tools.md`: which PubMed tool answers which need, and building support and
+  counter queries.
+- `references/pitfalls.md`: recurring mistakes. Skim before finalizing.
 
 ## 12. Gotchas
 
-The full list is in `references/pitfalls.md`. The ones you'll hit most: searching loose words
-instead of resolved entities, citing from titles without reading the abstract, treating a single
-study or a preprint as settled, presenting an inference as fact, and reporting the papers without
-lining them up against the PMIDs ProKN already carries.
+The full list is in `references/pitfalls.md`. The ones you'll hit most: searching PubMed before the
+inferences are written down, counting an edge's own PMID as independent support, searching only
+for support, dropping inferences that didn't hold up, and treating "no literature found" as a
+refutation.

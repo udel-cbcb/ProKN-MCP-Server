@@ -56,7 +56,7 @@ The server exposes the agent skills in [`skills/`](./skills) (`prokn-search`, `p
 - `skill://<name>/_manifest`: JSON file listing (path, size, sha256) of everything in the skill folder
 - `skill://<name>/<path>` (resource template): supporting files, e.g. `skill://prokn-search/references/tool-map.md` or `skill://prokn-explorer/scripts/prokn_explorer.py`
 
-Each skill is also registered as an MCP prompt of the same name, so clients that only surface tools and prompts (e.g. Claude Desktop's "/" menu) can offer it directly. `prokn-literature-review` additionally needs the PubMed MCP connected in the client for its literature search.
+Each skill is also registered as an MCP prompt of the same name, so clients that only surface tools and prompts (e.g. Claude Desktop's "/" menu) can offer it directly. `prokn-literature-review` additionally needs the PubMed MCP connected in the client, to check its graph inferences against the literature.
 
 Only subfolders of `skills/` containing a `SKILL.md` are picked up; the committed `.skill` zip bundles are ignored. The `skills/` folder must be present next to `mcpserver.py` (the Docker image copies it). FastMCP clients can enumerate them with `fastmcp.utilities.skills.list_skills()` / `download_skill()`; other clients can just list and read resources.
 
@@ -66,7 +66,7 @@ When you change anything under `skills/`:
 
 1. **Keep `description` on a single line** in the `SKILL.md` frontmatter (single-quoted YAML). FastMCP's line-based frontmatter parser can't read `description: >-` folded blocks, which would be exposed as the literal string `>-`.
 2. **Rebuild the bundle**: run the skill's `build.sh` and commit the updated `.skill` (the bundles in `skills/` are generated from the source folders).
-3. **Keep version references in sync**: any `prokn-*  vX.Y.Z` string in prose (skill bodies, READMEs, the `skills` field example in `mcpserver.py`) must match the `metadata.version` in that skill's `SKILL.md`. Current versions: `prokn-search` v0.3.0, `prokn-explorer` v0.3.0, `prokn-literature-review` v0.2.2.
+3. **Keep version references in sync**: any `prokn-*  vX.Y.Z` string in prose (skill bodies, READMEs, the `skills` field example in `mcpserver.py`) must match the `metadata.version` in that skill's `SKILL.md`. Current versions: `prokn-search` v0.3.0, `prokn-explorer` v0.3.0, `prokn-literature-review` v0.3.0.
 4. **Tool renames are guarded**: `tests/test_skills_provider.py` fails if a skill references a tool the server no longer exposes. PubMed MCP tools referenced by `prokn-literature-review` are allow-listed there as external.
 5. **Adding a skill**: also add an `@mcp.prompt` wrapper in `mcpserver.py` and its name to `EXPECTED_SKILLS` in `tests/test_skills_provider.py`.
 
