@@ -60,6 +60,11 @@ mcp = FastMCP(
             large result sets, summarize and surface the most significant rows rather than
             silently dropping data. Keep domain abbreviations as written.
         5. Briefly explain your approach in biological terms before acting.
+        6. Agent skills: this server also serves step-by-step methods as resources. For a
+            multi-step investigation, read skill://prokn-search/SKILL.md and follow it. To test
+            graph inferences against PubMed, use skill://prokn-literature-review/SKILL.md; to
+            show a gene set as a network, skill://prokn-explorer/SKILL.md. Reference files are
+            under skill://<name>/references/. If a skill is already installed, use that copy.
     """
 )
 

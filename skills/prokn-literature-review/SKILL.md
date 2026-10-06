@@ -34,7 +34,7 @@ step, say that this skill reasons from the graph first, and offer to pull the gr
 ## 2. The pipeline
 
 1. **Graph evidence.** Resolve the entities and pull the edges that bear on the question, with
-   their provenance (section 4). `prokn-search` can do this and hand over the set.
+   their provenance, using the `prokn-search` skill when it's available (section 4).
 2. **Inferences.** From the graph evidence alone, state what it implies, each inference tied to
    the edges it rests on and given a prior confidence (section 5).
 3. **Literature check.** For each inference, search PubMed for supporting and contradicting work,
@@ -70,15 +70,23 @@ step, say that this skill reasons from the graph first, and offer to pull the gr
 
 ## 4. Step 1: gather the graph evidence
 
-Resolve the entities with `search_entities`, then pull the edges the question needs (drug targets,
-kinase-site edges, paths between proteins, shared pathways or complexes). If `prokn-search` already
-ran, reuse its entities and edges instead of querying again. Keep, for each edge:
+**If the `prokn-search` skill is available,** load it and follow its search flow from "Start"
+through "Cite" (steps 0 to 5 of its section 4), then come back here. That covers resetting the
+query log, resolving entities, retrieving edges, combining sources, and citing provenance. Skip its
+"Visualize" and "Report and record" steps: this skill saves one record at the end that also covers
+the literature check, and gives the user one write-up instead of two. If `prokn-search` already ran
+earlier in the conversation, reuse its entities and edges instead of querying again.
+
+**If `prokn-search` isn't available,** do the short version here. Call `reset_query_log` before
+the first ProKN call so the record covers only this run. Resolve the entities with
+`search_entities`, then pull the edges the question needs (drug targets, kinase-site edges, paths
+between proteins, shared pathways or complexes).
+
+Either way, keep for each edge:
 
 - the two entities and the relationship,
 - its provenance: PMIDs if present, otherwise the source database, plus any measurement value
   (LINCS `log2Ratio`, DrugCentral IC50).
-
-Call `reset_query_log` before the first ProKN call so the record covers only this run.
 
 ## 5. Step 2: infer from the graph
 
@@ -163,9 +171,10 @@ Give the user the saved file path plus a one- or two-line summary.
 "What does ProKN suggest about how alpelisib affects kinase signaling, and does the literature back
 it?"
 
-1. `reset_query_log()`, then `search_entities("alpelisib")` and
+1. Follow `prokn-search` through "Cite": `reset_query_log()`, `search_entities("alpelisib")`,
    `get_phosphosites_regulated_by_perturbagen(perturbagen="alpelisib", direction="down")` for the
-   LINCS P100 sites it lowers, then `get_proteins_catalyzing_sites` for their kinases.
+   LINCS P100 sites it lowers, then `get_proteins_catalyzing_sites` for their kinases, each edge
+   with its evidence. Skip its record step.
 2. Inferences from the graph, before any search. For example: "Alpelisib reduces signaling through
    kinase K, since it lowers several sites K catalyzes" (mechanism; basis: the LINCS edges and the
    kinase-site edges with their PMIDs; prior: low, because LINCS edges are measurements). Write one

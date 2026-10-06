@@ -136,3 +136,26 @@ def test_skills_reference_only_registered_tools():
     assert not missing, (
         f"skills reference tools the server does not expose: {sorted(missing)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Server instructions point clients at the skills; every skill:// address they
+# name must resolve, and they must stay under the ~2 KB clients may keep.
+# ---------------------------------------------------------------------------
+
+def test_instructions_point_to_readable_skills():
+    async def check():
+        async with Client(mcpserver.mcp) as c:
+            instr = c.initialize_result.instructions or ""
+            uris = sorted(set(re.findall(r"skill://[a-z-]+/SKILL\.md", instr)))
+            texts = {}
+            for u in uris:
+                r = await c.read_resource(u)
+                texts[u] = r[0].text if isinstance(r, list) else r
+            return instr, uris, texts
+
+    instr, uris, texts = _run(check())
+    assert {u.split("/")[2] for u in uris} == EXPECTED_SKILLS, "instructions should name every skill"
+    for u, body in texts.items():
+        assert body.startswith("---"), f"{u} did not resolve to a SKILL.md"
+    assert len(instr.encode()) <= 2048, f"server instructions are {len(instr.encode())} bytes"

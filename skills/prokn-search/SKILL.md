@@ -102,6 +102,10 @@ Call `reset_query_log` at the start, or the record will include earlier calls. T
 session and clears when the server restarts. `get_query_log` is there if you want to inspect the raw
 calls.
 
+When `prokn-literature-review` runs this skill as its first step, stop after step 5 ("Cite") and
+hand the entities and edges back to it. That skill saves a single record at the end, covering both
+the graph calls and the literature check, so don't save one here.
+
 ## 6. Evidence and provenance
 
 - Relationship tools return an `evidence` object on each edge. It holds PMIDs when the source

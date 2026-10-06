@@ -58,6 +58,8 @@ The server exposes the agent skills in [`skills/`](./skills) (`prokn-search`, `p
 
 Each skill is also registered as an MCP prompt of the same name, so clients that only surface tools and prompts (e.g. Claude Desktop's "/" menu) can offer it directly. `prokn-literature-review` additionally needs the PubMed MCP connected in the client, to check its graph inferences against the literature.
 
+The server's instructions, which every client receives when it connects, also point the model to `skill://prokn-search/SKILL.md` and the other two skills. In clients that let the model read MCP resources, it can find and follow the skills without the user picking a prompt; installed copies of the skills take priority.
+
 Only subfolders of `skills/` containing a `SKILL.md` are picked up; the committed `.skill` zip bundles are ignored. The `skills/` folder must be present next to `mcpserver.py` (the Docker image copies it). FastMCP clients can enumerate them with `fastmcp.utilities.skills.list_skills()` / `download_skill()`; other clients can just list and read resources.
 
 ### Editing skills
