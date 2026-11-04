@@ -374,7 +374,7 @@ def test_create_reproducibility_record_literature_section(tmp_path, monkeypatch)
         findings="graph edge",
         literature='search_articles("lapatinib AND EGFR"); PMIDs 22178589, 38986734')
     text = list(tmp_path.glob("prokn-record-*.md"))[0].read_text()
-    assert "## Literature (PubMed)" in text       # literature field becomes its own section
+    assert "## Literature" in text                # literature field becomes its own section
     assert "22178589" in text
 
 

@@ -63,7 +63,7 @@ A connection you'd expect from the rest of the graph is missing.
 - **Speculative:** a bridge or a gap.
 
 Write the prior down with the inference. The literature check can raise or lower it later
-(`verification.md`), but the prior records what the graph alone supports.
+(`SKILL.md`, section 7), but the prior records what the graph alone supports.
 
 ## Writing the inference
 

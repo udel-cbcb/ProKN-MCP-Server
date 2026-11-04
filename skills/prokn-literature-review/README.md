@@ -1,16 +1,16 @@
 # prokn-literature-review
 
-An Agent Skill that teaches a model to draw inferences from the ProKN graph and then test them
-against the literature. It pulls the ProKN edges that bear on a gene/protein/drug/disease set
-(often from `prokn-search`), states confidence-graded inferences from those edges (edge strength,
-mechanisms, A-B-C bridges, shared context, gaps), and then searches PubMed through the PubMed MCP
-for papers that support or contradict each one. The result is a verdict table (supported, mixed,
-contradicted, or no literature found) with a short summary.
+An Agent Skill that draws inferences from the ProKN graph and tests them against the literature.
+It pulls the ProKN edges for a gene, protein, drug, or disease set (often via `prokn-search`),
+writes confidence-graded inferences from them (edge strength, mechanisms, A-B-C bridges, shared
+context, gaps) before any literature search, then searches PubMed, plus Paperclip when it's
+connected, for papers that support or contradict each one. The result is a verdict table
+(Supported, Mixed, Contradicted, No literature found) whose citations link to the exact sentences
+behind them, a short summary, and a reproducibility record.
 
-Inferences are written down before any PubMed search, so the papers test them instead of shaping
-them. It has no tool of its own; it describes how to use the connected ProKN and PubMed tools. See
-`SKILL.md` for the pipeline and operating rules. Pairs with `prokn-search` (entity set + graph
-evidence) and `prokn-explorer` (network view).
+It has no tools of its own; it drives the connected ProKN, PubMed, and Paperclip tools. See
+`SKILL.md` for the method. Pairs with `prokn-search` (entity set and graph evidence) and
+`prokn-explorer` (network view).
 
 ```
 skills/
@@ -20,33 +20,39 @@ skills/
     ├── README.md                  # this file
     ├── build.sh                   # rebuilds the bundle into ../ (the skills/ dir)
     └── references/                # extra detail, loaded on demand
-        ├── pubmed-tools.md        # which PubMed tool answers which need + query building
         ├── inference.md           # inference patterns from graph edges, prior confidence
-        ├── verification.md        # PubMed checks, verdicts, final confidence, table
-        └── pitfalls.md            # recurring mistakes and fixes
+        ├── verification.md        # sources, quoting, linking, tiered reading, evidence tiers
+        ├── pubmed-tools.md        # PubMed tools and query building
+        ├── paperclip-tools.md     # optional Paperclip source: tools, evidence output, trials/FDA
+        └── pitfalls.md            # common mistakes
 ```
 
-Status: early (v0.3.0). Version 0.3.0 reverses the order of earlier versions: inferences now come
-from the graph first and PubMed is used to test them, instead of reviewing the literature first and
-inferring from it.
+## Status: early (v0.5.0)
+
+- **0.5.0:** Paperclip (GXL) as an optional second source (preprints, trial registries, FDA
+  documents, the claim-level `evidence` search, line-numbered full text), merged with PubMed so
+  each paper counts once. Each citation links to its quoted sentence with a text-fragment URL,
+  which opens the paper with that sentence highlighted.
+- **0.4.0:** every cited paper is backed by a sentence copied word for word, and a paper with no
+  such sentence doesn't count. Tiered reading: abstracts for every paper, full text for the one or
+  two papers per inference that decide its verdict.
+- **0.3.0:** inferences come from the graph first, and the literature tests them.
 
 ## Requirements
 
-Both the **ProKN MCP server** (for the graph evidence the inferences come from) and the **PubMed
-MCP** (for the literature check) must be connected in your client. The `prokn-search` skill is
-useful for gathering the graph evidence. This skill has no script of its own; it drives the
-connected servers' tools.
+The **ProKN MCP server** (graph evidence) and the **PubMed MCP** (literature check) must be
+connected in your client. The `prokn-search` skill helps gather the graph evidence.
+
+**Optional: Paperclip (GXL).** Add a custom connector pointing at `https://paperclip.gxl.ai/mcp`
+and sign in with a GXL account (in the Claude apps: Customize → Connectors → Add custom connector;
+custom connectors need a paid plan). Setup for other clients is at
+[paperclip.gxl.ai/install](https://paperclip.gxl.ai/install). Rate limits are per account, and the
+free tier covers this skill's call pattern.
 
 ## Packaging it as a .skill bundle
 
-A `.skill` file is just a zip of this folder's contents (with `SKILL.md` at the top level) renamed
-to `.skill`. From inside this folder:
-
-```bash
-./build.sh
-```
-
-Or by hand:
+A `.skill` file is a zip of this folder's contents, with `SKILL.md` at the top level. From inside
+this folder, run `./build.sh`, or by hand:
 
 ```bash
 zip -r ../prokn-literature-review.skill SKILL.md references -x '*/.DS_Store'
@@ -56,33 +62,30 @@ zip -r ../prokn-literature-review.skill SKILL.md references -x '*/.DS_Store'
 
 - **Cowork:** open the `.skill` file and click "Save skill".
 - **Claude Code:** copy the `prokn-literature-review/` folder into `~/.claude/skills/` (personal) or
-  `.claude/skills/` in a repo (project-scoped). No packaging needed there.
+  `.claude/skills/` in a repo (project-scoped).
 
 ## Via the ProKN MCP server
 
-No install needed: the server exposes this skill as MCP resources from the repo's `skills/`
-folder (see the root README's Agent Skills section), and as the `prokn-literature-review` MCP
-prompt:
+No install needed: the server exposes this skill as MCP resources from the repo's `skills/` folder
+(see the root README's Agent Skills section), and as the `prokn-literature-review` MCP prompt:
 
 - `skill://prokn-literature-review/SKILL.md`: the skill definition
 - `skill://prokn-literature-review/_manifest`: file listing (path, size, sha256)
-- `skill://prokn-literature-review/<path>`: supporting files, e.g. `references/inference.md`
-  or `references/verification.md`
+- `skill://prokn-literature-review/<path>`: supporting files, e.g. `references/verification.md`
 
-The PubMed search itself still needs the PubMed MCP connected in the client; the ProKN server does
-not proxy it.
+The PubMed search still needs the PubMed MCP connected in the client, and the optional Paperclip
+source needs the Paperclip MCP; the ProKN server proxies neither.
 
 ## Maintainer rules
 
 - **`description` stays on a single line** in `SKILL.md` frontmatter (single-quoted YAML).
   FastMCP's parser can't read `description: >-` folds and would expose `>-` as the description.
 - **Bump `metadata.version`** in `SKILL.md` when the skill changes.
-- Keep the reproducibility guidance (section 9) in sync with `prokn-search`: PubMed calls are not
-  in ProKN's query log, so the queries and PMIDs are passed in the `literature` argument of
-  `create_reproducibility_record`, which records them in their own section.
-
-## Note
-
-The committed `prokn-literature-review.skill` (in the parent `skills/` folder) is built from the
-source in this folder (`SKILL.md`, `references/`), so run `./build.sh` and re-commit the new
-`.skill` whenever you change those.
+- **Keep the reproducibility guidance (section 9) in sync with `prokn-search`.** PubMed and
+  Paperclip calls aren't in ProKN's query log, so queries, Paperclip result IDs, and cited papers
+  go in the `literature` argument of `create_reproducibility_record`.
+- **Paperclip tool names** in `references/paperclip-tools.md` are the MCP server's own (`evidence`,
+  `search`, `lookup`, `ls`, `cat`, `grep`, `results`, `merge`). If GXL renames them, update that
+  file.
+- **Rebuild the bundle.** The committed `prokn-literature-review.skill` is built from this folder,
+  so run `./build.sh` and re-commit it whenever `SKILL.md` or `references/` change.

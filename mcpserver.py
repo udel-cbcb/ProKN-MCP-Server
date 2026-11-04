@@ -62,7 +62,8 @@ mcp = FastMCP(
         5. Briefly explain your approach in biological terms before acting.
         6. Agent skills: this server also serves step-by-step methods as resources. For a
             multi-step investigation, read skill://prokn-search/SKILL.md and follow it. To test
-            graph inferences against PubMed, use skill://prokn-literature-review/SKILL.md; to
+            graph inferences against PubMed (and Paperclip, if connected), use
+            skill://prokn-literature-review/SKILL.md; to
             show a gene set as a network, skill://prokn-explorer/SKILL.md. Reference files are
             under skill://<name>/references/. If a skill is already installed, use that copy.
     """
@@ -106,7 +107,7 @@ def prokn_explorer_prompt() -> str:
     return _skill_prompt_body("prokn-explorer")
 
 
-@mcp.prompt(name="prokn-literature-review", description="Draw confidence-graded inferences from ProKN graph evidence, then test each against PubMed for supporting and contradicting papers (needs the PubMed MCP)")
+@mcp.prompt(name="prokn-literature-review", description="Draw confidence-graded inferences from ProKN graph evidence, then test each against PubMed for supporting and contradicting papers (needs the PubMed MCP; also uses Paperclip if connected)")
 def prokn_literature_review_prompt() -> str:
     """The prokn-literature-review skill as a selectable prompt."""
     return _skill_prompt_body("prokn-literature-review")
@@ -395,9 +396,10 @@ def _build_record(session_key, question, findings, skipped, skills, literature="
     if findings:
         lines += ["", "## Findings", findings]
     if literature:
-        # PubMed runs on a separate MCP server, so its calls aren't in the query log above.
-        # Record the queries and PMIDs here so the literature step is reproducible too.
-        lines += ["", "## Literature (PubMed)", literature]
+        # PubMed and Paperclip run on separate MCP servers, so their calls aren't in the query
+        # log above. Record the queries and cited papers here so the literature step is
+        # reproducible too.
+        lines += ["", "## Literature", literature]
     if skipped:
         lines += ["", "## Skipped", skipped]
     return "\n".join(lines) + "\n"
@@ -409,7 +411,7 @@ def create_reproducibility_record(
     findings: Annotated[str, Field(description="The findings, with evidence (markdown allowed).")] = "",
     skipped: Annotated[str, Field(description="Branches you skipped and why, one per line.")] = "",
     skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-search v0.3.0, prokn-explorer v0.3.0'.")] = "",
-    literature: Annotated[str, Field(description="Literature step, if any: the exact PubMed queries run and the PMIDs cited (markdown allowed). PubMed is a separate MCP server so its calls are not in the query log; pass them here so the review is reproducible.")] = "",
+    literature: Annotated[str, Field(description="Literature step, if any: the exact PubMed queries run, any Paperclip calls with their source and result IDs, and the papers cited with their quotes (markdown allowed). PubMed and Paperclip are separate MCP servers so their calls are not in the query log; pass them here so the review is reproducible.")] = "",
 ) -> str:
     """Build the reproducibility record from this session's query log and write it to a .md file.
 
@@ -420,7 +422,8 @@ def create_reproducibility_record(
     (how many tool calls, which sources).
 
     Pass `literature` when a prokn-literature-review step ran: the query log only captures ProKN tool
-    calls, so the PubMed queries and PMIDs must be handed in here to be recorded.
+    calls, so the PubMed queries, Paperclip calls, and cited papers must be handed in here to be
+    recorded.
 
     The file goes to PROKN_RECORD_DIR if set, otherwise a `prokn_records/` folder in the server's
     working directory; on a remote/hosted server it lands on the server, not your machine.

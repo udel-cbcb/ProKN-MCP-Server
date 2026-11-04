@@ -20,8 +20,10 @@ import mcpserver
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 EXPECTED_SKILLS = {"prokn-search", "prokn-explorer", "prokn-literature-review"}
 
-# Tools that skills call on *other* MCP servers (prokn-literature-review drives the PubMed MCP).
-# They are not expected on the ProKN server, so the contract test ignores them.
+# Tools that skills call on *other* MCP servers (prokn-literature-review drives the PubMed MCP,
+# and the Paperclip MCP when connected). They are not expected on the ProKN server, so the
+# contract test ignores them. Paperclip's tool names (evidence, search, lookup, grep, cat, ...)
+# don't match the prefixes the extractor looks for, so they don't need listing here.
 EXTERNAL_TOOLS = {
     "search_articles",
     "get_article_metadata",
