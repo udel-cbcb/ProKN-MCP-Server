@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from arg_normalization import AliasNormalizationMiddleware
 import neo4j
@@ -216,37 +217,72 @@ PROKN_IDMAPPING_URL = os.environ.get(
     "https://idmappingtest.uniprot.org/cgi-bin/idmapping_http_client3",
 )
 
+# The driver is lazy: creating it doesn't connect, and it reconnects on its own when Neo4j comes
+# back, so the server can start (and stay up) while the database is briefly unreachable.
 driver = neo4j.GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 
-def verify_neo4j_connection(retries: int = 5, delay: float = 2.0) -> bool:
-    """Block until Neo4j is reachable, or give up after `retries` attempts.
+# Errors that mean "the database isn't reachable right now", as opposed to a bad query.
+_DB_DOWN_ERRORS = (neo4j.exceptions.ServiceUnavailable, neo4j.exceptions.SessionExpired)
 
-    Called at server startup (in __main__), NOT at import time, so the module can
-    be imported for unit testing without a running database.
+
+def _db_down_message() -> str:
+    return (f"ProKN's Neo4j database isn't reachable right now ({NEO4J_URI}). Check that Neo4j "
+            f"is running and try again; the server reconnects on its own once it's back.")
+
+
+def _db_auth_message() -> str:
+    return (f"Neo4j at {NEO4J_URI} rejected the credentials. Check NEO4J_USERNAME and "
+            f"NEO4J_PASSWORD in the server's environment.")
+
+
+def verify_neo4j_connection(retries: int | None = None, delay: float | None = None) -> bool:
+    """Check whether Neo4j is reachable, retrying briefly. Returns True or False; never exits.
+
+    Called at server startup (in __main__), NOT at import time, so the module can be imported
+    for unit testing without a running database. Kept short (default 3 tries, 1 s apart) so the
+    MCP handshake isn't held up; override with NEO4J_STARTUP_RETRIES / NEO4J_STARTUP_DELAY.
     """
+    if retries is None:
+        retries = int(os.environ.get("NEO4J_STARTUP_RETRIES", "3"))
+    if delay is None:
+        delay = float(os.environ.get("NEO4J_STARTUP_DELAY", "1"))
     print(f"Testing connection to Neo4j at {NEO4J_URI}...", file=sys.stderr)
-    for i in range(retries):
+    for i in range(max(retries, 1)):
         try:
             driver.verify_connectivity()
             print("Neo4j connection successful!", file=sys.stderr)
             return True
+        except neo4j.exceptions.AuthError:
+            print(_db_auth_message(), file=sys.stderr)
+            return False  # retrying won't fix credentials
         except Exception:
             print(f"Waiting for Neo4j... ({i + 1}/{retries})", file=sys.stderr)
-            time.sleep(delay)
-    print(f"Failed to connect to Neo4j at {NEO4J_URI}. Check NEO4J_URI.", file=sys.stderr)
+            if i + 1 < retries:
+                time.sleep(delay)
+    print(f"Could not reach Neo4j at {NEO4J_URI}.", file=sys.stderr)
     return False
+
 
 # Main helper function to run Cypher queries
 def _run(cypher: str, params: dict = {}, limit: int = 500, timeout: float = 60.0):
-    """Execute a read-only Cypher query and return rows as plain dicts."""
+    """Execute a read-only Cypher query and return rows as plain dicts.
+
+    If the database is unreachable or rejects the credentials, raises a ToolError with a clear
+    message, which FastMCP returns to the client as the tool's error (the server keeps running).
+    """
     # Ensure there's a LIMIT in the query or use the parameter
     if "LIMIT" not in cypher.upper():
         cypher = f"{cypher} LIMIT {limit}"
 
-    with driver.session(default_access_mode=neo4j.READ_ACCESS) as session:
-        with session.begin_transaction(timeout=timeout) as tx:
-            result = tx.run(cypher, **params)
-            return [record.data() for record in result]
+    try:
+        with driver.session(default_access_mode=neo4j.READ_ACCESS) as session:
+            with session.begin_transaction(timeout=timeout) as tx:
+                result = tx.run(cypher, **params)
+                return [record.data() for record in result]
+    except _DB_DOWN_ERRORS as e:
+        raise ToolError(_db_down_message()) from e
+    except neo4j.exceptions.AuthError as e:
+        raise ToolError(_db_auth_message()) from e
 
 
 def _run_introspection(cypher: str, what: str, timeout: float = 30.0):
@@ -255,6 +291,8 @@ def _run_introspection(cypher: str, what: str, timeout: float = 30.0):
     store and can exceed the timeout on a large graph like ProKN."""
     try:
         return _run(cypher, timeout=timeout)
+    except ToolError:
+        raise  # database down or bad credentials: report that, not a timeout
     except Exception as e:
         return (f"Could not retrieve {what}: the schema procedure timed out or errored "
                 f"on this graph (it scans the entire store). Use get_graph_schema() for the "
@@ -704,6 +742,10 @@ def execute_read_only_cypher(
             with session.begin_transaction(timeout=30.0) as tx:
                 result = tx.run(query)
                 return [record.data() for record in result][:200]
+    except _DB_DOWN_ERRORS:
+        return f"Error: {_db_down_message()}"
+    except neo4j.exceptions.AuthError:
+        return f"Error: {_db_auth_message()}"
     except Exception as e:
         return f"Cypher Execution Error: {str(e)}"
 
@@ -1097,7 +1139,13 @@ if __name__ == "__main__":
     transport_arg = sys.argv[1] if len(sys.argv) > 1 else "stdio"
 
     if not verify_neo4j_connection():
-        sys.exit(1)
+        # Strict mode (e.g. Docker/CI, where a restart policy handles it) keeps the old fail-fast
+        # behavior. By default, start anyway: tools report the database as unreachable until it's
+        # back, instead of the client seeing the whole server as disconnected.
+        if os.environ.get("PROKN_REQUIRE_NEO4J", "").strip().lower() in ("1", "true", "yes", "on"):
+            sys.exit(1)
+        print("Starting without Neo4j; tools will report it as unreachable until it's back.",
+              file=sys.stderr)
 
     if transport_arg in ["http", "sse", "streamable-http"]:
         # Port 8000 by default; override with PROKN_MCP_PORT when it's already taken
