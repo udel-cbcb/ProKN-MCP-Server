@@ -11,7 +11,7 @@ The default is `GENENAME`, which means the inputs are already gene symbols and n
 | Input | `--from` code |
 | --- | --- |
 | Gene symbol (default, no mapping) | `GENENAME` |
-| UniProt accession (e.g. `P00533`) | `ACC` |
+| UniProt accession (e.g. `P00533`; isoforms like `P00533-2` map via the accession) | `ACC` |
 | UniProt entry name (e.g. `EGFR_HUMAN`) | `ID` |
 | UniProt/SwissProt accession | `SWISSPROT` |
 | RefSeq protein | `P_REFSEQ_AC` |
@@ -30,7 +30,7 @@ The default is `GENENAME`, which means the inputs are already gene symbols and n
 The service supports about 110 identifier types. The current, authoritative list is served by the
 mapping host itself:
 
-`https://idmappingtest.uniprot.org/cgi-bin/idmapping_http_client3?page=list`
+`https://idmapping.uniprot.org/cgi-bin/idmapping_http_client3?page=list`
 
 It returns lines like `Human name => CODE`. Pass the CODE to `--from`.
 

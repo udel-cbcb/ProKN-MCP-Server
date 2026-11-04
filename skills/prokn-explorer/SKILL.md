@@ -95,7 +95,8 @@ get_explorer_network(gene_names=["P00533", "P04637", "P42345"], from_type="ACC")
 
 Mapping uses PIR's UniProt ID mapping service (a fixed lookup), and falls back to the graph's own
 `search_entities` if PIR is unreachable. When `from_type` is used, the result also includes
-`mapping` (which route resolved the IDs) and `unmapped` (any inputs that didn't resolve). The
+`mapping` (which route resolved the IDs), `unmapped` (any inputs that didn't resolve), and, for
+UniProt isoform IDs, `isoforms_via_accession` (see section 5). The
 `from_type` codes are the same as the script's `--from` (see `references/id-types.md`);
 `GENENAME` is the default and means the inputs are already gene symbols.
 
@@ -152,6 +153,9 @@ browser for them unless they ask.
   Other IDs don't match directly, so pass `--from <code>` to map them first.
 - **Mapping is best-effort.** An ID can map to several gene symbols, or to none. Unmapped inputs are
   reported, not dropped quietly.
+- **Isoforms map through their accession.** With `ACC` or `SWISSPROT`, an isoform ID such as
+  `P00533-2` has no gene of its own in the mapping, so it's retried as `P00533` (same gene, EGFR).
+  Tell the user which isoforms were mapped this way; two isoforms of one gene become one symbol.
 - **Case matters.** Symbols have to be canonical (`MAPK11`, not `mapk11`). Mapped symbols already
   come back canonical.
 - **Two or more symbols** (checked after any mapping).

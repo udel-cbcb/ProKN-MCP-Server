@@ -214,7 +214,7 @@ PROKN_WEB_BASE_URL = os.environ.get(
 )
 PROKN_IDMAPPING_URL = os.environ.get(
     "PROKN_IDMAPPING_URL",
-    "https://idmappingtest.uniprot.org/cgi-bin/idmapping_http_client3",
+    "https://idmapping.uniprot.org/cgi-bin/idmapping_http_client3",
 )
 
 # The driver is lazy: creating it doesn't connect, and it reconnects on its own when Neo4j comes
@@ -975,7 +975,9 @@ def _map_ids_via_pir(ids, from_type, timeout=60):
     genes, matched = [], set()
     for line in text.splitlines():
         line = line.strip()
-        if not line:
+        # skip blanks and the trailer PIR adds when some IDs fail
+        # ('MSG: 200 -- 3 IDs have no matches: ...'), which isn't a mapping
+        if not line or line.upper().startswith("MSG:"):
             continue
         parts = line.split("\t") if "\t" in line else line.split(None, 1)
         if len(parts) < 2:
@@ -988,6 +990,27 @@ def _map_ids_via_pir(ids, from_type, timeout=60):
             genes.append(gene)
     unmapped = [i for i in ids if i.lower() not in matched]
     return genes, unmapped
+
+
+# A UniProt isoform ID is the entry's accession plus "-N" (P00533-2 is isoform 2 of P00533).
+# Neither PIR nor the graph search returns a gene for isoform IDs, but every isoform of an entry
+# comes from the entry's gene, so an unmapped isoform can be mapped through its accession.
+_ISOFORM_RE = re.compile(
+    r"^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})-\d+$", re.I)
+_UNIPROT_ACC_TYPES = ("ACC", "SWISSPROT")
+
+
+def _retry_isoforms(mapper, genes, unmapped):
+    """Map unmapped isoform IDs through their accession with the same mapper(ids) -> (genes,
+    unmapped). Returns (genes, unmapped, via_accession {isoform: accession})."""
+    bases = {i: _ISOFORM_RE.match(i).group(1) for i in unmapped if _ISOFORM_RE.match(i)}
+    if not bases:
+        return genes, unmapped, {}
+    base_genes, base_unmapped = mapper(sorted(set(bases.values())))
+    failed = {b.lower() for b in base_unmapped}
+    via = {i: b for i, b in bases.items() if b.lower() not in failed}
+    genes = list(genes) + [g for g in base_genes if g not in genes]
+    return genes, [i for i in unmapped if i not in via], via
 
 
 def _symbol_from_search_row(row):
@@ -1067,8 +1090,9 @@ def get_explorer_network(
 
     Pass gene symbols directly, or IDs of another type with from_type; the server maps those to
     gene symbols with PIR's UniProt ID mapping, and falls back to the graph's own search
-    (search_entities) if PIR is unreachable. Needs two or more symbols after mapping. Returns
-    {explorer_url, gene_names, note} (plus mapping/unmapped when from_type is used), or a guidance
+    (search_entities) if PIR is unreachable. UniProt isoform IDs (P00533-2) map through their
+    accession. Needs two or more symbols after mapping. Returns {explorer_url, gene_names, note}
+    (plus mapping/unmapped/isoforms_via_accession when from_type is used), or a guidance
     message on failure. The link is self-contained (gene set in the URL; the Explorer builds the
     network on page load), so it works on any instance. See PROKN_WEB_BASE_URL for the target.
 
@@ -1087,15 +1111,23 @@ def get_explorer_network(
     from_type = (from_type or "GENENAME").strip().upper()
     mapping = None
     unmapped = []
+    via_accession = {}
     if from_type == "GENENAME":
         genes = inputs
     else:
         try:
             genes, unmapped = _map_ids_via_pir(inputs, from_type)
             mapping = f"{len(inputs)} {from_type} id(s) mapped to gene symbols via PIR ID mapping"
+            mapper = lambda ids: _map_ids_via_pir(ids, from_type)
         except Exception:
             genes, unmapped = _map_ids_via_graph(inputs)
             mapping = f"PIR ID mapping unavailable; {from_type} id(s) resolved to gene symbols via graph search"
+            mapper = _map_ids_via_graph
+        if from_type in _UNIPROT_ACC_TYPES and unmapped:
+            try:
+                genes, unmapped, via_accession = _retry_isoforms(mapper, genes, unmapped)
+            except Exception:
+                pass  # keep the first pass; the isoforms stay listed as unmapped
         deduped = []
         for g in genes:
             if g not in deduped:
@@ -1131,6 +1163,8 @@ def get_explorer_network(
     if from_type != "GENENAME":
         result["mapping"] = mapping
         result["unmapped"] = unmapped
+        if via_accession:
+            result["isoforms_via_accession"] = via_accession
     return result
 
 if __name__ == "__main__":

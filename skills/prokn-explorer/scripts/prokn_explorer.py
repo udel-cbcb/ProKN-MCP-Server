@@ -11,6 +11,7 @@ first, using PIR's UniProt ID mapping service.
 """
 import argparse
 import json
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -22,7 +23,7 @@ DEFAULT_BASE_URL = "https://research.bioinformatics.udel.edu/ProKN"
 # with a warning, in case the API adds categories later.
 ENTITY_TYPES = ("GOTerm", "Complex", "Protein", "SubCellClass", "Site", "Domain",
                 "Pathway", "Variant", "Disease", "Isoform", "PTMSite")
-IDMAPPING_URL = "https://idmappingtest.uniprot.org/cgi-bin/idmapping_http_client3"
+IDMAPPING_URL = "https://idmapping.uniprot.org/cgi-bin/idmapping_http_client3"
 
 
 class EgressBlocked(RuntimeError):
@@ -94,7 +95,9 @@ def map_ids_to_genes(ids, from_type, timeout=60):
     matched = set()
     for line in text.splitlines():
         line = line.strip()
-        if not line:
+        # skip blanks and the trailer PIR adds when some IDs fail
+        # ('MSG: 200 -- 3 IDs have no matches: ...'), which isn't a mapping
+        if not line or line.upper().startswith("MSG:"):
             continue
         parts = line.split("\t") if "\t" in line else line.split(None, 1)
         if len(parts) < 2:
@@ -107,6 +110,33 @@ def map_ids_to_genes(ids, from_type, timeout=60):
             genes.append(gene)
     unmapped = [i for i in ids if i.lower() not in matched]
     return genes, unmapped
+
+
+# A UniProt isoform ID is the entry's accession plus "-N" (P00533-2 is isoform 2 of P00533).
+# The mapping service has no gene for isoform IDs, but every isoform of an entry comes from the
+# entry's gene, so an unmapped isoform can be mapped through its accession.
+ISOFORM_RE = re.compile(
+    r"^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})-\d+$", re.I)
+UNIPROT_ACC_TYPES = ("ACC", "SWISSPROT")
+
+
+def map_ids_with_isoform_fallback(ids, from_type, timeout=60):
+    """map_ids_to_genes, then retry unmapped UniProt isoform IDs with their accession.
+
+    Returns (genes, unmapped, via_accession), where via_accession maps each isoform ID that was
+    resolved this way to the accession used.
+    """
+    genes, unmapped = map_ids_to_genes(ids, from_type, timeout)
+    if from_type not in UNIPROT_ACC_TYPES:
+        return genes, unmapped, {}
+    bases = {i: ISOFORM_RE.match(i).group(1) for i in unmapped if ISOFORM_RE.match(i)}
+    if not bases:
+        return genes, unmapped, {}
+    base_genes, base_unmapped = map_ids_to_genes(sorted(set(bases.values())), from_type, timeout)
+    failed = {b.lower() for b in base_unmapped}
+    via = {i: b for i, b in bases.items() if b.lower() not in failed}
+    genes = genes + [g for g in base_genes if g not in genes]
+    return genes, [i for i in unmapped if i not in via], via
 
 
 def normalize_entity_types(values):
@@ -189,9 +219,12 @@ def main(argv=None):
         if from_type == "GENENAME":
             genes = inputs
         else:
-            genes, unmapped = map_ids_to_genes(inputs, from_type)
+            genes, unmapped, via = map_ids_with_isoform_fallback(inputs, from_type)
             print(f"Mapped {len(inputs)} {from_type} id(s) to {len(genes)} gene symbol(s).",
                   file=sys.stderr)
+            if via:
+                print("Isoform IDs mapped through their UniProt accession: "
+                      + ", ".join(f"{i} -> {b}" for i, b in via.items()), file=sys.stderr)
             if unmapped:
                 print(f"No gene symbol for: {', '.join(unmapped)}", file=sys.stderr)
             genes = dedupe(genes)

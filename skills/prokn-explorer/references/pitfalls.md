@@ -26,11 +26,17 @@ main workflow.
   accessions all map to the same gene, you're left with one symbol and the request is rejected.
   Report the collapse instead of a bare error.
 
-- **ID mapping uses a second host.** With `--from`, the script calls `idmappingtest.uniprot.org`,
+- **ID mapping uses a second host.** With `--from`, the script calls `idmapping.uniprot.org`,
   not ProKN. In a sandbox that host has to be allow-listed too; the script's error names whichever
   host was blocked. It uses the service's synchronous mode and reads tab-delimited
-  `source<TAB>gene` lines. If the mapping output ever looks wrong, re-check that format against a
-  live response.
+  `source<TAB>gene` lines, skipping bare IDs (no match) and the trailing
+  `MSG: 200 -- N IDs have no matches` line. If the mapping output ever looks wrong, re-check that
+  format against a live response.
+
+- **Isoform IDs.** The mapping returns no gene for `P00533-2`-style IDs, so with `ACC`/`SWISSPROT`
+  they're retried with the accession before the dash (`P00533`). The result names them
+  (`isoforms_via_accession`, or a stderr line from the script). The network is gene-level, so this
+  loses nothing, but two isoforms of one gene collapse to one symbol.
 
 - **Filtering by node type.** `entity_types` keeps only the named categories (Pathway, Complex,
   GOTerm, and so on). An unknown name is passed through with a warning rather than rejected, since

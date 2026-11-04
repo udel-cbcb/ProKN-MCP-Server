@@ -320,6 +320,73 @@ def test_map_ids_via_pir(mock_open):
     assert unmapped == ["Q0"]
 
 
+@patch("mcpserver.urllib.request.urlopen")
+def test_map_ids_via_pir_ignores_msg_trailer(mock_open):
+    # real response shape when some IDs fail: bare IDs, blank lines, then a MSG: line
+    mock_open.return_value = _FakeResp(
+        b"Q01279\tEgfr\nP00533-2\nX12345\n\n\n"
+        b'MSG: 200 -- 2 IDs have no matches: "P00533-2,X12345".\n')
+    genes, unmapped = mcpserver._map_ids_via_pir(["Q01279", "P00533-2", "X12345"], "ACC")
+    assert genes == ["Egfr"]
+    assert unmapped == ["P00533-2", "X12345"]
+
+
+# PIR's real answer for isoform IDs: no gene, then a MSG: trailer
+_PIR_ISOFORM_MISS = (b"P04637\tTP53\nP00533-2\nX12345\n\n"
+                     b'MSG: 200 -- 2 IDs have no matches: "P00533-2,X12345".\n')
+
+
+def _ids_in(call):
+    req = call.args[0]
+    return urllib.parse.parse_qs(urllib.parse.urlparse(req.full_url).query)["ids"][0]
+
+
+@patch("mcpserver.urllib.request.urlopen")
+def test_get_explorer_network_maps_isoform_through_accession(mock_open):
+    mock_open.side_effect = [_FakeResp(_PIR_ISOFORM_MISS), _FakeResp(b"P00533\tEGFR\n")]
+    res = mcpserver.get_explorer_network(["P04637", "P00533-2", "X12345"], from_type="ACC")
+    assert res["gene_names"] == ["TP53", "EGFR"]
+    assert res["unmapped"] == ["X12345"]  # not an isoform ID, so no retry
+    assert res["isoforms_via_accession"] == {"P00533-2": "P00533"}
+    assert _ids_in(mock_open.call_args_list[1]) == "P00533"
+
+
+@patch("mcpserver.urllib.request.urlopen")
+def test_isoform_retry_only_for_uniprot_accessions(mock_open):
+    mock_open.return_value = _FakeResp(b"NP_005219.2\tEGFR\nNP_000537.3\tTP53\nP00533-2\n")
+    res = mcpserver.get_explorer_network(["NP_005219.2", "NP_000537.3", "P00533-2"],
+                                         from_type="P_REFSEQ_AC")
+    assert mock_open.call_count == 1
+    assert res["unmapped"] == ["P00533-2"] and "isoforms_via_accession" not in res
+
+
+@patch("mcpserver._map_ids_via_graph")
+@patch("mcpserver.urllib.request.urlopen", side_effect=OSError("PIR down"))
+def test_isoform_retry_uses_graph_fallback_when_pir_down(mock_open, mock_graph):
+    mock_graph.side_effect = lambda ids: (
+        (["TP53"], ["P00533-2"]) if ids == ["P04637", "P00533-2"] else (["EGFR"], []))
+    res = mcpserver.get_explorer_network(["P04637", "P00533-2"], from_type="ACC")
+    assert res["gene_names"] == ["TP53", "EGFR"]
+    assert res["isoforms_via_accession"] == {"P00533-2": "P00533"}
+    assert "graph search" in res["mapping"]
+
+
+def test_explorer_script_maps_isoform_through_accession(capsys):
+    import importlib.util, pathlib
+    path = pathlib.Path(mcpserver.__file__).parent / "skills/prokn-explorer/scripts/prokn_explorer.py"
+    spec = importlib.util.spec_from_file_location("prokn_explorer_script", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.IDMAPPING_URL == mcpserver.PROKN_IDMAPPING_URL  # script and server agree
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.side_effect = [_FakeResp(_PIR_ISOFORM_MISS), _FakeResp(b"P00533\tEGFR\n")]
+        assert mod.main(["P04637", "P00533-2", "X12345", "--from", "ACC"]) == 0
+    out = capsys.readouterr()
+    assert _filter_from_url(out.out.strip()) == {"gene_names": ["TP53", "EGFR"]}
+    assert "P00533-2 -> P00533" in out.err and "X12345" in out.err
+    assert "200 --" not in out.out  # the MSG: trailer never becomes a gene
+
+
 @patch("mcpserver._run")
 def test_map_ids_via_graph_hit(mock_run):
     mock_run.return_value = [
