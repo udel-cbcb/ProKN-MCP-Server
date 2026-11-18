@@ -115,7 +115,6 @@ Layout:
 - `tests/test_arg_normalization.py` : offline, the argument-normalization middleware
 - `tests/test_tools_offline.py` : offline, tool wrappers with the Neo4j layer mocked
 - `tests/test_neo4j_resilience.py` : offline, the server starting and answering while Neo4j is unreachable
-- `tests/test_tool_routing.py` : offline, prompt → tool routing signals in descriptions
 - `tests/test_skills_provider.py` : offline, skills exposed as `skill://` resources + skill↔server tool contract
 - `tests/test_tools_live.py` : live, real Neo4j (marked `live`)
 

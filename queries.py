@@ -58,27 +58,31 @@ QUERY_PHOSPHOSITES_REGULATED_BY_PERTURBAGEN_TEMPLATE = """
     ORDER BY abs(pDiff) DESC
 """
 
+# Protein.label is the UniProt accession and geneNames the symbol(s), ';'-separated, so the
+# symbol is reported first. $site_labels are full, upper-case PTM-site labels.
 QUERY_GET_PROTEINS_CATALYZING_SITES = """
     MATCH (k:Protein)-[cat:CATALYZES]->(pSite:PTMSite)
-    WHERE any(s IN $site_labels WHERE toLower(pSite.label) = toLower(s))
+    WHERE pSite.label IN $site_labels
       AND any(ec IN split(coalesce(k.ecNumber, ''), ';') WHERE trim(ec) =~ $ec_filter)
     RETURN
         pSite.label AS site_label,
-        coalesce(k.label, k.geneNames) AS protein_symbol,
+        coalesce(k.geneNames, k.label) AS protein_symbol,
+        k.label AS protein_accession,
         k.proteinName AS protein_name,
         k.ecNumber AS ec_number,
+        cat.SAB AS source,
         properties(cat) AS evidence
 """
 
-# TODO: double check whether this should be p.label or p.geneNames
 QUERY_GET_PHOSPHOSITES_CATALYZED_BY_PROTEINS = """
     MATCH (p:Protein)-[:CATALYZES]->(targetSite:PTMSite)
     WHERE any(x IN $protein_list
-              WHERE toLower(p.label) = toLower(x)
-                 OR toLower(coalesce(p.geneNames, '')) = toLower(x))
+              WHERE toLower(p.label) = x
+                 OR any(g IN split(coalesce(p.geneNames, ''), ';') WHERE toLower(trim(g)) = x))
     WITH p, collect(DISTINCT targetSite.label) AS all_catalyzed_sites
     RETURN
-        coalesce(p.label, p.geneNames) AS protein,
+        coalesce(p.geneNames, p.label) AS protein,
+        p.label AS protein_accession,
         p.ecNumber AS ec_number,
         all_catalyzed_sites
 """

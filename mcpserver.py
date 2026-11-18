@@ -534,38 +534,44 @@ def get_phosphosites_regulated_by_perturbagen(
 
 @mcp.tool()
 def get_proteins_catalyzing_sites(
-    phosphosites: Annotated[list[str], Field(description="PTM-site labels (e.g. ['AKT1_S473']), as returned by other tools.")],
+    phosphosites: Annotated[list[str], Field(description="Site labels as other tools return them (e.g. 'PHOSPHORYLATION_O95239_S801'); the accession_residue short form 'O95239_S801' also works.")],
     ec_filter: Annotated[str, Field(description="EC-number regex for the catalyzing protein. Default '2.7.*' = kinases; pass '.*' for any enzyme.")] = "2.7.*",
 ) -> list[dict] | str:
-    """Kinases/enzymes that catalyze the given phosphosites (iPTMnet CATALYZES edges).
+    """Kinases/enzymes that catalyze the given phosphosites (CATALYZES edges from iPTMnet and PhosphoSIGNOR).
 
     USE THIS TOOL for "which kinase phosphorylates <site>?". The inverse (sites a
     kinase catalyzes) is get_phosphosites_catalyzed_by_proteins.
 
-    Returns rows of {site_label, protein_symbol, protein_name, ec_number, evidence},
-    or a guidance message if nothing matches.
+    Returns rows of {site_label, protein_symbol, protein_accession, protein_name, ec_number,
+    source, evidence}, or a guidance message if nothing matches.
     """
     sites = [str(s).strip() for s in phosphosites if str(s).strip()]
     if not sites:
-        return "Error: 'phosphosites' is required (a list of PTM-site labels)."
+        return "Error: 'phosphosites' is required (a list of site labels)."
+    # Labels are <PTM type>_<accession>_<residue>, all upper case, so a short form
+    # (O95239_S801, "O95239 S801") is the full label without its PHOSPHORYLATION_ prefix.
+    labels = [re.sub(r"[\s:]+", "_", s).upper() for s in sites]
+    labels += ["PHOSPHORYLATION_" + label for label in labels]
     rows = _run(QUERY_GET_PROTEINS_CATALYZING_SITES,
-                params={"site_labels": sites, "ec_filter": (ec_filter or ".*").strip()})
+                params={"site_labels": labels, "ec_filter": (ec_filter or ".*").strip()})
     if rows:
         return rows
-    return (f"No catalyzing proteins found for {sites} (ec_filter='{ec_filter}'). "
-            f"Confirm the exact site labels, or widen ec_filter to '.*'.")
+    return (f"No catalyzing proteins found for {sites} (ec_filter='{ec_filter}'). Pass site "
+            f"labels as another tool returned them (e.g. 'PHOSPHORYLATION_O95239_S801') or as "
+            f"accession_residue ('O95239_S801'); get a protein's accession from search_entities. "
+            f"Pass ec_filter='.*' to include non-kinase enzymes.")
 
 @mcp.tool()
 def get_phosphosites_catalyzed_by_proteins(
     proteins: Annotated[list[str], Field(description="Kinase/protein names or symbols, e.g. ['CDK1','MAPK1']. A single string is accepted.")],
 ) -> list[dict] | str:
-    """Phosphosites catalyzed by the given kinase(s)/protein(s), from iPTMnet.
+    """Phosphosites catalyzed by the given kinase(s)/protein(s), from iPTMnet and PhosphoSIGNOR.
 
     USE THIS TOOL for "which sites does <kinase> phosphorylate?". The inverse (kinases
     for a given site) is get_proteins_catalyzing_sites.
 
-    Returns rows of {protein, ec_number, all_catalyzed_sites}, or a guidance message
-    if nothing matches.
+    Returns rows of {protein, protein_accession, ec_number, all_catalyzed_sites}, or a
+    guidance message if nothing matches.
     """
     ids = [str(s).strip().lower() for s in proteins if str(s).strip()]
     if not ids:
@@ -574,7 +580,8 @@ def get_phosphosites_catalyzed_by_proteins(
     if rows:
         return rows
     return (f"No catalyzed phosphosites found for {ids}. Confirm the kinase "
-            f"name/symbol with search_entities (this uses iPTMnet CATALYZES edges).")
+            f"name/symbol with search_entities (this uses CATALYZES edges from iPTMnet and "
+            f"PhosphoSIGNOR).")
 
 @mcp.tool()
 def get_drugs_mechanisms(
