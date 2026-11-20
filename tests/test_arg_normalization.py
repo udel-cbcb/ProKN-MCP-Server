@@ -10,6 +10,12 @@ def test_alias_renamed_and_string_coerced_to_list():
     assert out == {"drug_identifiers": ["aspirin"]}
 
 
+def test_empty_list_entries_dropped():
+    # models sometimes send [null] for "no filter"; it used to fail validation
+    out = normalize_args("get_explorer_network", {"gene_names": ["CDK1", "CDK2"], "entity_types": [None]})
+    assert out == {"gene_names": ["CDK1", "CDK2"]}
+
+
 def test_stray_value_routed_to_primary():
     assert normalize_args("search_entities", {"foobar": "EGFR"}).get("term") == "EGFR"
 
