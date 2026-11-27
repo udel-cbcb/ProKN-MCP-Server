@@ -203,10 +203,18 @@ def normalize_args(name: str, args: dict, specs: dict = TOOL_ARG_SPECS) -> dict:
                 out[primary] = v
                 break
 
-    # Coerce the list params: a lone string or number becomes a one item list
+    # Coerce the list params: a lone string or number becomes a one item list, and empty
+    # entries are dropped (models sometimes send [null] for "no filter"). An optional list
+    # left empty is removed so the tool's default applies.
     for lp in lists:
-        if lp in out and not isinstance(out[lp], (list, tuple)):
-            out[lp] = [out[lp]]
+        if lp not in out or out[lp] is None:
+            continue
+        items = out[lp] if isinstance(out[lp], (list, tuple)) else [out[lp]]
+        items = [x for x in items if x is not None and x != ""]
+        if items or lp == primary:
+            out[lp] = items
+        else:
+            del out[lp]
 
     return out
 

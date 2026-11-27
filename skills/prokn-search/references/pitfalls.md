@@ -21,9 +21,11 @@ the flow.
   `EGFR`). Use the identifiers `search_entities` returns to pick the right one, and pass a specific
   id when a tool supports it.
 
-- **Phosphosite label format.** Site labels from one tool must match what the next tool expects.
-  Feed the labels a tool returns (for example the `PHOSPHORYLATION_<acc>_<site>` form) straight into
-  `get_proteins_catalyzing_sites`; don't hand-build them.
+- **Phosphosite label format.** Feed the labels a tool returns (the `PHOSPHORYLATION_<acc>_<site>`
+  form) straight into `get_proteins_catalyzing_sites`; the accession_residue short form
+  (`O95239_S801`) also works, but a gene symbol (`KIF4A_S801`) doesn't, so get the accession from
+  `search_entities` first. "No catalyzing proteins found" means no kinase is recorded for that
+  site, not that the site is unstudied.
 
 - **`ec_filter` hides non-kinase targets.** Several tools default `ec_filter` to `2.7.*`, i.e.
   kinases only. If you want all targets (for a drug, a catalyzing enzyme, etc.), pass `".*"` or the

@@ -31,7 +31,7 @@ each piece.
 - **Two-level perturbation response.** Combine the transcriptomic layer
   (`get_genes_regulated_by_drugs`, LINCS L1000) with the phosphoproteomic layer
   (`get_phosphosites_regulated_by_perturbagen` then `get_proteins_catalyzing_sites`, LINCS P100 +
-  iPTMnet) to see the kinases a perturbagen affects at both levels.
+  iPTMnet/PhosphoSIGNOR) to see the kinases a perturbagen affects at both levels.
 - **Union of drug targets.** Pull targets from both ChEMBL (`get_drugs_mechanisms`) and DrugCentral,
   then de-duplicate on the protein. Label the evidence layer for each (a curated mechanism vs a
   measured IC50 vs a tox-screen signal).

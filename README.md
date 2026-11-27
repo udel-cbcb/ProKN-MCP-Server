@@ -26,6 +26,17 @@ export NEO4J_URI="bolt://localhost:<neo4j_local_port>"
 export NEO4J_USERNAME="<neo4j_username>"
 export NEO4J_PASSWORD="<neo4j_password>"
 ```
+
+   If Neo4j isn't reachable at startup, the server still starts: it checks briefly, then tools
+   return a clear "database isn't reachable" message until Neo4j is back, and reconnect on their
+   own (no restart needed). Optional settings:
+
+   | Variable | Default | Effect |
+   |---|---|---|
+   | `NEO4J_STARTUP_RETRIES` | `3` | Connection attempts at startup |
+   | `NEO4J_STARTUP_DELAY` | `1` | Seconds between attempts |
+   | `PROKN_REQUIRE_NEO4J` | off | Set to `1` to exit if Neo4j is unreachable (useful with a container restart policy) |
+
 2. Start the MCP Server: `python mcpserver.py streamable-http`
 3. Add the following config to your MCP Client's MCP server list. If the `mcpservers` key already exists, then just add the `prokn` key and value under it. 
 
@@ -103,7 +114,7 @@ python -m pytest --cov=. -v
 Layout:
 - `tests/test_arg_normalization.py` : offline, the argument-normalization middleware
 - `tests/test_tools_offline.py` : offline, tool wrappers with the Neo4j layer mocked
-- `tests/test_tool_routing.py` : offline, prompt → tool routing signals in descriptions
+- `tests/test_neo4j_resilience.py` : offline, the server starting and answering while Neo4j is unreachable
 - `tests/test_skills_provider.py` : offline, skills exposed as `skill://` resources + skill↔server tool contract
 - `tests/test_tools_live.py` : live, real Neo4j (marked `live`)
 

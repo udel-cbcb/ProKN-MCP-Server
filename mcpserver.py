@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
 from arg_normalization import AliasNormalizationMiddleware
 import neo4j
@@ -62,7 +63,8 @@ mcp = FastMCP(
         5. Briefly explain your approach in biological terms before acting.
         6. Agent skills: this server also serves step-by-step methods as resources. For a
             multi-step investigation, read skill://prokn-search/SKILL.md and follow it. To test
-            graph inferences against PubMed, use skill://prokn-literature-review/SKILL.md; to
+            graph inferences against PubMed (and Paperclip, if connected), use
+            skill://prokn-literature-review/SKILL.md; to
             show a gene set as a network, skill://prokn-explorer/SKILL.md. Reference files are
             under skill://<name>/references/. If a skill is already installed, use that copy.
     """
@@ -106,7 +108,7 @@ def prokn_explorer_prompt() -> str:
     return _skill_prompt_body("prokn-explorer")
 
 
-@mcp.prompt(name="prokn-literature-review", description="Draw confidence-graded inferences from ProKN graph evidence, then test each against PubMed for supporting and contradicting papers (needs the PubMed MCP)")
+@mcp.prompt(name="prokn-literature-review", description="Draw confidence-graded inferences from ProKN graph evidence, then test each against PubMed for supporting and contradicting papers (needs the PubMed MCP; also uses Paperclip if connected)")
 def prokn_literature_review_prompt() -> str:
     """The prokn-literature-review skill as a selectable prompt."""
     return _skill_prompt_body("prokn-literature-review")
@@ -212,40 +214,75 @@ PROKN_WEB_BASE_URL = os.environ.get(
 )
 PROKN_IDMAPPING_URL = os.environ.get(
     "PROKN_IDMAPPING_URL",
-    "https://idmappingtest.uniprot.org/cgi-bin/idmapping_http_client3",
+    "https://idmapping.uniprot.org/cgi-bin/idmapping_http_client3",
 )
 
+# The driver is lazy: creating it doesn't connect, and it reconnects on its own when Neo4j comes
+# back, so the server can start (and stay up) while the database is briefly unreachable.
 driver = neo4j.GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 
-def verify_neo4j_connection(retries: int = 5, delay: float = 2.0) -> bool:
-    """Block until Neo4j is reachable, or give up after `retries` attempts.
+# Errors that mean "the database isn't reachable right now", as opposed to a bad query.
+_DB_DOWN_ERRORS = (neo4j.exceptions.ServiceUnavailable, neo4j.exceptions.SessionExpired)
 
-    Called at server startup (in __main__), NOT at import time, so the module can
-    be imported for unit testing without a running database.
+
+def _db_down_message() -> str:
+    return (f"ProKN's Neo4j database isn't reachable right now ({NEO4J_URI}). Check that Neo4j "
+            f"is running and try again; the server reconnects on its own once it's back.")
+
+
+def _db_auth_message() -> str:
+    return (f"Neo4j at {NEO4J_URI} rejected the credentials. Check NEO4J_USERNAME and "
+            f"NEO4J_PASSWORD in the server's environment.")
+
+
+def verify_neo4j_connection(retries: int | None = None, delay: float | None = None) -> bool:
+    """Check whether Neo4j is reachable, retrying briefly. Returns True or False; never exits.
+
+    Called at server startup (in __main__), NOT at import time, so the module can be imported
+    for unit testing without a running database. Kept short (default 3 tries, 1 s apart) so the
+    MCP handshake isn't held up; override with NEO4J_STARTUP_RETRIES / NEO4J_STARTUP_DELAY.
     """
+    if retries is None:
+        retries = int(os.environ.get("NEO4J_STARTUP_RETRIES", "3"))
+    if delay is None:
+        delay = float(os.environ.get("NEO4J_STARTUP_DELAY", "1"))
     print(f"Testing connection to Neo4j at {NEO4J_URI}...", file=sys.stderr)
-    for i in range(retries):
+    for i in range(max(retries, 1)):
         try:
             driver.verify_connectivity()
             print("Neo4j connection successful!", file=sys.stderr)
             return True
+        except neo4j.exceptions.AuthError:
+            print(_db_auth_message(), file=sys.stderr)
+            return False  # retrying won't fix credentials
         except Exception:
             print(f"Waiting for Neo4j... ({i + 1}/{retries})", file=sys.stderr)
-            time.sleep(delay)
-    print(f"Failed to connect to Neo4j at {NEO4J_URI}. Check NEO4J_URI.", file=sys.stderr)
+            if i + 1 < retries:
+                time.sleep(delay)
+    print(f"Could not reach Neo4j at {NEO4J_URI}.", file=sys.stderr)
     return False
+
 
 # Main helper function to run Cypher queries
 def _run(cypher: str, params: dict = {}, limit: int = 500, timeout: float = 60.0):
-    """Execute a read-only Cypher query and return rows as plain dicts."""
+    """Execute a read-only Cypher query and return rows as plain dicts.
+
+    If the database is unreachable or rejects the credentials, raises a ToolError with a clear
+    message, which FastMCP returns to the client as the tool's error (the server keeps running).
+    """
     # Ensure there's a LIMIT in the query or use the parameter
     if "LIMIT" not in cypher.upper():
         cypher = f"{cypher} LIMIT {limit}"
 
-    with driver.session(default_access_mode=neo4j.READ_ACCESS) as session:
-        with session.begin_transaction(timeout=timeout) as tx:
-            result = tx.run(cypher, **params)
-            return [record.data() for record in result]
+    try:
+        with driver.session(default_access_mode=neo4j.READ_ACCESS) as session:
+            with session.begin_transaction(timeout=timeout) as tx:
+                result = tx.run(cypher, **params)
+                return [record.data() for record in result]
+    except _DB_DOWN_ERRORS as e:
+        raise ToolError(_db_down_message()) from e
+    except neo4j.exceptions.AuthError as e:
+        raise ToolError(_db_auth_message()) from e
 
 
 def _run_introspection(cypher: str, what: str, timeout: float = 30.0):
@@ -254,6 +291,8 @@ def _run_introspection(cypher: str, what: str, timeout: float = 30.0):
     store and can exceed the timeout on a large graph like ProKN."""
     try:
         return _run(cypher, timeout=timeout)
+    except ToolError:
+        raise  # database down or bad credentials: report that, not a timeout
     except Exception as e:
         return (f"Could not retrieve {what}: the schema procedure timed out or errored "
                 f"on this graph (it scans the entire store). Use get_graph_schema() for the "
@@ -395,9 +434,10 @@ def _build_record(session_key, question, findings, skipped, skills, literature="
     if findings:
         lines += ["", "## Findings", findings]
     if literature:
-        # PubMed runs on a separate MCP server, so its calls aren't in the query log above.
-        # Record the queries and PMIDs here so the literature step is reproducible too.
-        lines += ["", "## Literature (PubMed)", literature]
+        # PubMed and Paperclip run on separate MCP servers, so their calls aren't in the query
+        # log above. Record the queries and cited papers here so the literature step is
+        # reproducible too.
+        lines += ["", "## Literature", literature]
     if skipped:
         lines += ["", "## Skipped", skipped]
     return "\n".join(lines) + "\n"
@@ -409,7 +449,7 @@ def create_reproducibility_record(
     findings: Annotated[str, Field(description="The findings, with evidence (markdown allowed).")] = "",
     skipped: Annotated[str, Field(description="Branches you skipped and why, one per line.")] = "",
     skills: Annotated[str, Field(description="Skills used, e.g. 'prokn-search v0.3.0, prokn-explorer v0.3.0'.")] = "",
-    literature: Annotated[str, Field(description="Literature step, if any: the exact PubMed queries run and the PMIDs cited (markdown allowed). PubMed is a separate MCP server so its calls are not in the query log; pass them here so the review is reproducible.")] = "",
+    literature: Annotated[str, Field(description="Literature step, if any: the exact PubMed queries run, any Paperclip calls with their source and result IDs, and the papers cited with their quotes (markdown allowed). PubMed and Paperclip are separate MCP servers so their calls are not in the query log; pass them here so the review is reproducible.")] = "",
 ) -> str:
     """Build the reproducibility record from this session's query log and write it to a .md file.
 
@@ -420,7 +460,8 @@ def create_reproducibility_record(
     (how many tool calls, which sources).
 
     Pass `literature` when a prokn-literature-review step ran: the query log only captures ProKN tool
-    calls, so the PubMed queries and PMIDs must be handed in here to be recorded.
+    calls, so the PubMed queries, Paperclip calls, and cited papers must be handed in here to be
+    recorded.
 
     The file goes to PROKN_RECORD_DIR if set, otherwise a `prokn_records/` folder in the server's
     working directory; on a remote/hosted server it lands on the server, not your machine.
@@ -493,38 +534,44 @@ def get_phosphosites_regulated_by_perturbagen(
 
 @mcp.tool()
 def get_proteins_catalyzing_sites(
-    phosphosites: Annotated[list[str], Field(description="PTM-site labels (e.g. ['AKT1_S473']), as returned by other tools.")],
+    phosphosites: Annotated[list[str], Field(description="Site labels as other tools return them (e.g. 'PHOSPHORYLATION_O95239_S801'); the accession_residue short form 'O95239_S801' also works.")],
     ec_filter: Annotated[str, Field(description="EC-number regex for the catalyzing protein. Default '2.7.*' = kinases; pass '.*' for any enzyme.")] = "2.7.*",
 ) -> list[dict] | str:
-    """Kinases/enzymes that catalyze the given phosphosites (iPTMnet CATALYZES edges).
+    """Kinases/enzymes that catalyze the given phosphosites (CATALYZES edges from iPTMnet and PhosphoSIGNOR).
 
     USE THIS TOOL for "which kinase phosphorylates <site>?". The inverse (sites a
     kinase catalyzes) is get_phosphosites_catalyzed_by_proteins.
 
-    Returns rows of {site_label, protein_symbol, protein_name, ec_number, evidence},
-    or a guidance message if nothing matches.
+    Returns rows of {site_label, protein_symbol, protein_accession, protein_name, ec_number,
+    source, evidence}, or a guidance message if nothing matches.
     """
     sites = [str(s).strip() for s in phosphosites if str(s).strip()]
     if not sites:
-        return "Error: 'phosphosites' is required (a list of PTM-site labels)."
+        return "Error: 'phosphosites' is required (a list of site labels)."
+    # Labels are <PTM type>_<accession>_<residue>, all upper case, so a short form
+    # (O95239_S801, "O95239 S801") is the full label without its PHOSPHORYLATION_ prefix.
+    labels = [re.sub(r"[\s:]+", "_", s).upper() for s in sites]
+    labels += ["PHOSPHORYLATION_" + label for label in labels]
     rows = _run(QUERY_GET_PROTEINS_CATALYZING_SITES,
-                params={"site_labels": sites, "ec_filter": (ec_filter or ".*").strip()})
+                params={"site_labels": labels, "ec_filter": (ec_filter or ".*").strip()})
     if rows:
         return rows
-    return (f"No catalyzing proteins found for {sites} (ec_filter='{ec_filter}'). "
-            f"Confirm the exact site labels, or widen ec_filter to '.*'.")
+    return (f"No catalyzing proteins found for {sites} (ec_filter='{ec_filter}'). Pass site "
+            f"labels as another tool returned them (e.g. 'PHOSPHORYLATION_O95239_S801') or as "
+            f"accession_residue ('O95239_S801'); get a protein's accession from search_entities. "
+            f"Pass ec_filter='.*' to include non-kinase enzymes.")
 
 @mcp.tool()
 def get_phosphosites_catalyzed_by_proteins(
     proteins: Annotated[list[str], Field(description="Kinase/protein names or symbols, e.g. ['CDK1','MAPK1']. A single string is accepted.")],
 ) -> list[dict] | str:
-    """Phosphosites catalyzed by the given kinase(s)/protein(s), from iPTMnet.
+    """Phosphosites catalyzed by the given kinase(s)/protein(s), from iPTMnet and PhosphoSIGNOR.
 
     USE THIS TOOL for "which sites does <kinase> phosphorylate?". The inverse (kinases
     for a given site) is get_proteins_catalyzing_sites.
 
-    Returns rows of {protein, ec_number, all_catalyzed_sites}, or a guidance message
-    if nothing matches.
+    Returns rows of {protein, protein_accession, ec_number, all_catalyzed_sites}, or a
+    guidance message if nothing matches.
     """
     ids = [str(s).strip().lower() for s in proteins if str(s).strip()]
     if not ids:
@@ -533,7 +580,8 @@ def get_phosphosites_catalyzed_by_proteins(
     if rows:
         return rows
     return (f"No catalyzed phosphosites found for {ids}. Confirm the kinase "
-            f"name/symbol with search_entities (this uses iPTMnet CATALYZES edges).")
+            f"name/symbol with search_entities (this uses CATALYZES edges from iPTMnet and "
+            f"PhosphoSIGNOR).")
 
 @mcp.tool()
 def get_drugs_mechanisms(
@@ -701,6 +749,10 @@ def execute_read_only_cypher(
             with session.begin_transaction(timeout=30.0) as tx:
                 result = tx.run(query)
                 return [record.data() for record in result][:200]
+    except _DB_DOWN_ERRORS:
+        return f"Error: {_db_down_message()}"
+    except neo4j.exceptions.AuthError:
+        return f"Error: {_db_auth_message()}"
     except Exception as e:
         return f"Cypher Execution Error: {str(e)}"
 
@@ -930,7 +982,9 @@ def _map_ids_via_pir(ids, from_type, timeout=60):
     genes, matched = [], set()
     for line in text.splitlines():
         line = line.strip()
-        if not line:
+        # skip blanks and the trailer PIR adds when some IDs fail
+        # ('MSG: 200 -- 3 IDs have no matches: ...'), which isn't a mapping
+        if not line or line.upper().startswith("MSG:"):
             continue
         parts = line.split("\t") if "\t" in line else line.split(None, 1)
         if len(parts) < 2:
@@ -943,6 +997,27 @@ def _map_ids_via_pir(ids, from_type, timeout=60):
             genes.append(gene)
     unmapped = [i for i in ids if i.lower() not in matched]
     return genes, unmapped
+
+
+# A UniProt isoform ID is the entry's accession plus "-N" (P00533-2 is isoform 2 of P00533).
+# Neither PIR nor the graph search returns a gene for isoform IDs, but every isoform of an entry
+# comes from the entry's gene, so an unmapped isoform can be mapped through its accession.
+_ISOFORM_RE = re.compile(
+    r"^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})-\d+$", re.I)
+_UNIPROT_ACC_TYPES = ("ACC", "SWISSPROT")
+
+
+def _retry_isoforms(mapper, genes, unmapped):
+    """Map unmapped isoform IDs through their accession with the same mapper(ids) -> (genes,
+    unmapped). Returns (genes, unmapped, via_accession {isoform: accession})."""
+    bases = {i: _ISOFORM_RE.match(i).group(1) for i in unmapped if _ISOFORM_RE.match(i)}
+    if not bases:
+        return genes, unmapped, {}
+    base_genes, base_unmapped = mapper(sorted(set(bases.values())))
+    failed = {b.lower() for b in base_unmapped}
+    via = {i: b for i, b in bases.items() if b.lower() not in failed}
+    genes = list(genes) + [g for g in base_genes if g not in genes]
+    return genes, [i for i in unmapped if i not in via], via
 
 
 def _symbol_from_search_row(row):
@@ -1022,8 +1097,9 @@ def get_explorer_network(
 
     Pass gene symbols directly, or IDs of another type with from_type; the server maps those to
     gene symbols with PIR's UniProt ID mapping, and falls back to the graph's own search
-    (search_entities) if PIR is unreachable. Needs two or more symbols after mapping. Returns
-    {explorer_url, gene_names, note} (plus mapping/unmapped when from_type is used), or a guidance
+    (search_entities) if PIR is unreachable. UniProt isoform IDs (P00533-2) map through their
+    accession. Needs two or more symbols after mapping. Returns {explorer_url, gene_names, note}
+    (plus mapping/unmapped/isoforms_via_accession when from_type is used), or a guidance
     message on failure. The link is self-contained (gene set in the URL; the Explorer builds the
     network on page load), so it works on any instance. See PROKN_WEB_BASE_URL for the target.
 
@@ -1042,15 +1118,23 @@ def get_explorer_network(
     from_type = (from_type or "GENENAME").strip().upper()
     mapping = None
     unmapped = []
+    via_accession = {}
     if from_type == "GENENAME":
         genes = inputs
     else:
         try:
             genes, unmapped = _map_ids_via_pir(inputs, from_type)
             mapping = f"{len(inputs)} {from_type} id(s) mapped to gene symbols via PIR ID mapping"
+            mapper = lambda ids: _map_ids_via_pir(ids, from_type)
         except Exception:
             genes, unmapped = _map_ids_via_graph(inputs)
             mapping = f"PIR ID mapping unavailable; {from_type} id(s) resolved to gene symbols via graph search"
+            mapper = _map_ids_via_graph
+        if from_type in _UNIPROT_ACC_TYPES and unmapped:
+            try:
+                genes, unmapped, via_accession = _retry_isoforms(mapper, genes, unmapped)
+            except Exception:
+                pass  # keep the first pass; the isoforms stay listed as unmapped
         deduped = []
         for g in genes:
             if g not in deduped:
@@ -1086,6 +1170,8 @@ def get_explorer_network(
     if from_type != "GENENAME":
         result["mapping"] = mapping
         result["unmapped"] = unmapped
+        if via_accession:
+            result["isoforms_via_accession"] = via_accession
     return result
 
 if __name__ == "__main__":
@@ -1094,7 +1180,13 @@ if __name__ == "__main__":
     transport_arg = sys.argv[1] if len(sys.argv) > 1 else "stdio"
 
     if not verify_neo4j_connection():
-        sys.exit(1)
+        # Strict mode (e.g. Docker/CI, where a restart policy handles it) keeps the old fail-fast
+        # behavior. By default, start anyway: tools report the database as unreachable until it's
+        # back, instead of the client seeing the whole server as disconnected.
+        if os.environ.get("PROKN_REQUIRE_NEO4J", "").strip().lower() in ("1", "true", "yes", "on"):
+            sys.exit(1)
+        print("Starting without Neo4j; tools will report it as unreachable until it's back.",
+              file=sys.stderr)
 
     if transport_arg in ["http", "sse", "streamable-http"]:
         # Port 8000 by default; override with PROKN_MCP_PORT when it's already taken
